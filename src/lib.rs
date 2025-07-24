@@ -1,10 +1,15 @@
 use std::cmp::PartialEq;
 use std::error::Error;
 use std::fmt::{Display, Formatter};
+use std::path::PathBuf;
 use std::str::FromStr;
+use regex::Regex;
+use sprintf::sprintf;
 
 #[cfg(test)]
 mod tests {
+    use std::fs::File;
+    use std::io::Read;
     use super::*;
 
     #[test]
@@ -15,18 +20,47 @@ mod tests {
     }
 
     #[test]
-    fn header_read() {
-        let h = "NRRD0003\nthing1: thing1\nthing2: thing2\n\n thing3: thing3\n";
-        let hdr = Header::from_str(h).unwrap();
-        println!("{:?}", hdr);
+    fn header_read_list() {
+        let mut f = File::open("test_nrrds/detached_list.nhdr").unwrap();
+        let mut s = String::new();
+        f.read_to_string(&mut s).unwrap();
+        let hdr = Header::from_str(&s).unwrap();
+        hdr.resolve_data_files();
+        let (paths,subdim) = hdr.resolve_data_files().unwrap();
+        println!("{:?}", paths);
+        println!("{:?}", subdim);
     }
+
+    #[test]
+    fn header_read_multi() {
+        let mut f = File::open("test_nrrds/detached_multi.nhdr").unwrap();
+        let mut s = String::new();
+        f.read_to_string(&mut s).unwrap();
+        let hdr = Header::from_str(&s).unwrap();
+        let (paths,subdim) = hdr.resolve_data_files().unwrap();
+        println!("{:?}", paths);
+        println!("{:?}", subdim);
+    }
+
+    #[test]
+    fn header_read_single() {
+        let mut f = File::open("test_nrrds/detached_single.nhdr").unwrap();
+        let mut s = String::new();
+        f.read_to_string(&mut s).unwrap();
+        let hdr = Header::from_str(&s).unwrap();
+        let (paths,subdim) = hdr.resolve_data_files().unwrap();
+        println!("{:?}", paths);
+        println!("{:?}", subdim);
+    }
+
 
 }
 
 #[derive(Debug)]
-enum NrrdError {
+pub enum NrrdError {
     NrrdMagic,
     Dimension,
+    DimensionParse,
     DimensionAfterSizes,
     ParseSizes,
     ZeroSize,
@@ -147,7 +181,72 @@ struct Header {
     pub type_: DType,
     pub encoding: Encoding,
     pub block_size: Option<usize>,
+    pub data_file: Option<String>,
+    pub data_file_list: Vec<PathBuf>,
 }
+
+impl Header {
+
+    pub fn resolve_data_files(&self) -> Option<(Vec<PathBuf>,Option<usize>)> {
+
+        let mut paths = vec![];
+        let mut subdim = None;
+
+        if let Some(data_file) = &self.data_file {
+
+            // check if data_file describes multiple files
+            if data_file.contains("LIST") {
+
+                let re = Regex::new(r"LIST (\d)").expect("Regex error");
+                if let Some(cap) = re.captures(data_file) {
+                    subdim = cap.get(1).map(|s| s.as_str().parse::<usize>().unwrap());
+                }
+                paths = self.data_file_list.clone();
+                return Some((paths,subdim))
+
+            }
+
+            // check if data_file describes multiple files
+            let re = Regex::new(r#"(?:(\S+))\s+(-?\d+)\s+(-?\d+)\s+(-?\d+)(?:\s+(-?\d+))?"#).expect("invalid regex");
+            if let Some(capture) = re.captures(data_file) {
+
+                let sprintf_pattern = capture.get(1).unwrap().as_str();
+                let min = capture.get(2).unwrap().as_str().parse::<i32>().unwrap();
+                let max = capture.get(3).unwrap().as_str().parse::<i32>().unwrap();
+                let step = capture.get(4).unwrap().as_str().parse::<i32>().unwrap();
+                subdim = capture.get(5).map(|s| s.as_str().parse::<usize>().unwrap());
+
+                if step > 0 {
+                    for i in (min.abs()..=max.abs()).step_by(step as usize) {
+                        paths.push(
+                            PathBuf::from(sprintf!(sprintf_pattern, i).unwrap())
+                        )
+                    }
+                }
+
+                if step < 0 {
+                    for i in (max.abs()..=min.abs()).rev().step_by(step.abs() as usize) {
+                        paths.push(
+                            PathBuf::from(sprintf!(sprintf_pattern, i).unwrap())
+                        )
+                    }
+                }
+
+                return Some((paths,subdim));
+            }
+
+            paths.push(PathBuf::from(data_file));
+            return Some((paths,subdim));
+
+        }
+
+        None
+
+    }
+
+}
+
+
 
 impl FromStr for Header {
     type Err = NrrdError;
@@ -159,7 +258,9 @@ impl FromStr for Header {
         let mut type_ = None;
         let mut encoding = None;
         let mut sizes = vec![];
+        let mut data_file_list = vec![];
         let mut block_size = None;
+        let mut data_file = None;
 
         let mut lines:Vec<LineType> = vec![];
 
@@ -192,7 +293,7 @@ impl FromStr for Header {
                 let desc = raw_line[idx+2..].to_string();
 
                 if id.trim() == "dimension" {
-                    dimension = Some(id.parse::<usize>().map_err(|_| NrrdError::Dimension)?);
+                    dimension = Some(desc.parse::<usize>().map_err(|_| NrrdError::DimensionParse)?);
                 }
 
                 if id.trim() == "sizes" {
@@ -200,9 +301,6 @@ impl FromStr for Header {
                     sizes.resize(d,0);
                     for (s,a) in sizes.iter_mut().zip(desc.split_whitespace()) {
                         *s = a.parse::<usize>().map_err(|_|NrrdError::ParseSizes)?
-                    }
-                    if sizes.iter().product() == 0 {
-                        Err(NrrdError::ZeroSize)?
                     }
                 }
 
@@ -218,7 +316,20 @@ impl FromStr for Header {
                     block_size = Some(desc.trim().parse::<usize>().map_err(|_| NrrdError::BlockSizeParse)?);
                 }
 
+                if id.trim() == "data file" {
+                    data_file = Some(desc.trim().to_string());
+                }
+
                 lines.push(LineType::Field{id,desc});
+                continue;
+            }
+
+            if let Some(data_file) = &data_file {
+                if data_file.contains("LIST") {
+                    data_file_list.push(
+                        PathBuf::from(raw_line.to_string())
+                    )
+                }
             }
 
         }
@@ -236,7 +347,11 @@ impl FromStr for Header {
             Err(NrrdError::InvalidType)?
         }
 
-        Ok(Header {magic, lines, dimension, sizes, type_, encoding, block_size })
+        if sizes.iter().product::<usize>() == 0 || sizes.is_empty() {
+            Err(NrrdError::ZeroSize)?
+        }
+
+        Ok(Header {magic, lines, dimension, sizes, type_, encoding, block_size, data_file, data_file_list })
 
     }
 }

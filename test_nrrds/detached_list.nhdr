@@ -1,0 +1,20 @@
+NRRD0004
+# Complete NRRD file format specification at:
+# http://teem.sourceforge.net/nrrd/format.html
+content: inputfilename/privateShares/wa41/co_reg_S70228-inputs/S70228_m32/S70228_m32.headfile
+type: unsigned short
+dimension: 3
+space dimension: 3
+sizes: 700 360 360
+space directions: (0.029999999999999999,0,0) (0,0.029999999999999999,0) (0,0,0.029999999999999999)
+kinds: domain domain domain
+endian: big
+encoding: raw
+space units: "mm" "mm" "mm"
+space origin: (-10.484999999999999,-5.3849999999999998,-5.3849999999999998)
+data file: LIST
+/data/file/1.raw
+/data/file/2.raw
+/data/file/3.raw
+/data/file/4.raw
+/data/file/5.raw
