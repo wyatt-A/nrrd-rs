@@ -1,7 +1,10 @@
 use std::cmp::PartialEq;
 use std::error::Error;
 use std::fmt::{Display, Formatter};
-use std::path::PathBuf;
+use std::fs::File;
+use std::io;
+use std::io::{BufRead, BufReader};
+use std::path::{Path, PathBuf};
 use std::str::FromStr;
 use regex::Regex;
 use sprintf::sprintf;
@@ -9,7 +12,7 @@ use sprintf::sprintf;
 #[cfg(test)]
 mod tests {
     use std::fs::File;
-    use std::io::Read;
+    use std::io::{BufRead, BufReader, Read};
     use super::*;
 
     #[test]
@@ -53,6 +56,20 @@ mod tests {
         println!("{:?}", subdim);
     }
 
+
+    #[test]
+    fn read() {
+
+        let nrrd = "test_nrrds/detached_single.nhdr";
+
+        let (bytes,offset) = read_until_blank(nrrd).unwrap();
+        let s = String::from_utf8(bytes).unwrap();
+        let hdr = Header::from_str(&s);
+
+
+        println!("{:?}",hdr);
+        println!("offset: {:?}",offset);
+    }
 
 }
 
@@ -354,4 +371,26 @@ impl FromStr for Header {
         Ok(Header {magic, lines, dimension, sizes, type_, encoding, block_size, data_file, data_file_list })
 
     }
+}
+
+fn read_until_blank(path: impl AsRef<Path>) -> io::Result<(Vec<u8>, Option<u64>)> {
+    let mut rdr  = BufReader::new(File::open(path)?);
+    let mut line = Vec::new();   // reused buffer for each line
+    let mut acc  = Vec::new();   // accumulator for all bytes before blank line
+    let mut pos: u64 = 0;        // bytes consumed so far
+    let mut offset_after_blank = None;
+
+    while rdr.read_until(b'\n', &mut line)? != 0 {
+        let is_blank = line == b"\n" || line == b"\r\n";
+        if is_blank {
+            // first byte AFTER the blank line:
+            offset_after_blank = Some(pos + line.len() as u64);
+            break;
+        }
+        acc.extend_from_slice(&line);
+        pos += line.len() as u64;
+        line.clear();
+    }
+
+    Ok((acc, offset_after_blank))
 }
