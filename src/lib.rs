@@ -1,18 +1,22 @@
 use std::cmp::{min, PartialEq};
+use std::collections::HashSet;
+use std::env::current_dir;
 use std::error::Error;
 use std::fmt::{Display, Formatter};
 use std::fs::File;
 use std::io;
-use std::io::{BufRead, BufReader, Read, Seek, SeekFrom};
+use std::io::{BufRead, BufReader, Read, Seek, SeekFrom, Write};
 use std::num::ParseIntError;
 use std::path::{Path, PathBuf};
 use std::str::FromStr;
 use bytemuck::Pod;
 use bzip2::read::BzDecoder;
+use bzip2::write::BzEncoder;
 use regex::Regex;
 use sprintf::sprintf;
 use num_traits::{Euclid, NumCast, ToPrimitive};
 use flate2::read::GzDecoder;
+use flate2::write::GzEncoder;
 
 #[cfg(test)]
 mod tests {
@@ -70,6 +74,17 @@ mod tests {
         println!("{:?}", hdr.resolve_data_files());
     }
 
+    #[test]
+    fn read_attached() {
+        let nrrd = "B:/ProjectSpace/wa41/test_nrrds/Reg_1500_avg.nhdr";
+        let (payload,hdr) = read_nrrd_payload(nrrd);
+        println!("{:?}", hdr);
+        println!("{:?}", payload.len());
+
+        write_nrrd_payload_detached("B:/ProjectSpace/wa41/test_nrrds/Reg_1500_avg_copy",&hdr,&payload);
+
+    }
+
 }
 
 
@@ -83,7 +98,7 @@ pub fn read_nhdr(file_path:impl AsRef<Path>) -> Header {
 }
 
 
-pub fn read_nrrd(file_path:impl AsRef<Path>) -> (Vec<u8>,Header) {
+pub fn read_nrrd_payload(file_path:impl AsRef<Path>) -> (Vec<u8>, Header) {
 
     let mut f = File::open(&file_path).unwrap();
 
@@ -110,7 +125,7 @@ pub fn read_nrrd(file_path:impl AsRef<Path>) -> (Vec<u8>,Header) {
             .zip(detached_files)
             .for_each(|(byte_chunk,file)|{
                 let abs_path = if file.is_relative() {
-                    file_path.as_ref().join(file)
+                    file_path.as_ref().with_file_name(file)
                 }else {
                     file.to_owned()
                 };
@@ -123,6 +138,52 @@ pub fn read_nrrd(file_path:impl AsRef<Path>) -> (Vec<u8>,Header) {
     }
 
     (bytes,hdr)
+}
+
+
+pub fn write_nrrd_payload_detached(file_path:impl AsRef<Path>, hdr:&Header, payload:&[u8]) {
+
+    let mut hdr =  hdr.clone();
+
+    let idx = hdr.lines.iter().position(|line|{
+        match line {
+            LineType::Field { id,.. } => {
+                id == "data file" || id == "datafile"
+            }
+            _ => return false,
+        }
+    });
+
+    let fname = file_path.as_ref().file_name().unwrap().to_str().unwrap();
+
+    let detached_filename = match hdr.encoding {
+        Encoding::raw => Path::new(fname).with_extension("raw"),
+        Encoding::rawgz => Path::new(fname).with_extension("raw.gz"),
+        Encoding::rawbz2 => Path::new(fname).with_extension("raw.bz2"),
+        _=> panic!("not yet implemented"),
+    };
+
+    if let Some(idx) = idx {
+        hdr.lines.remove(idx);
+    }
+    hdr.lines.push(LineType::Field {id: "datafile".to_string(),desc:detached_filename.display().to_string() });
+
+    match hdr.encoding {
+        Encoding::raw => {
+            let mut f = File::create(file_path.as_ref().with_extension("raw")).unwrap();
+            write_raw(&mut f,payload)
+        }
+        Encoding::rawgz => {
+            let mut f = File::create(file_path.as_ref().with_extension("raw.gz")).unwrap();
+            write_gzip(&mut f,payload)
+        }
+        Encoding::rawbz2 => {
+            let mut f = File::create(file_path.as_ref().with_extension("raw.bz2")).unwrap();
+            write_bzip2(&mut f,payload);
+        }
+        _=> panic!("not yet implemented"),
+    }
+
 }
 
 /// helper function to read bytes from a file while accounting for different encodings and compression
@@ -172,7 +233,7 @@ impl Display for NrrdError {
 
 impl Error for NrrdError {}
 
-#[derive(Debug)]
+#[derive(Debug,Clone,Copy)]
 struct Magic {
     pub version: u8,
 }
@@ -193,11 +254,23 @@ impl Display for Magic {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug,Clone)]
 enum LineType {
+    Magic(Magic),
     Field{id:String,desc:String},
     Key{key:String,val:String},
     Comment(String),
+}
+
+impl Display for LineType {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        match self {
+            LineType::Magic(magic) => write!(f,"{magic}"),
+            LineType::Field { id,desc } => write!(f,"{id}: {desc}"),
+            LineType::Key { key,val } => write!(f,"{key}:={val}"),
+            LineType::Comment(comment) => write!(f,"# {comment}"),
+        }
+    }
 }
 
 #[derive(Debug,Clone,Copy,PartialEq,Eq)]
@@ -283,7 +356,7 @@ impl FromStr for Encoding {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug,Clone)]
 struct Header {
     pub magic: Magic,
     pub lines: Vec<LineType>,
@@ -362,7 +435,15 @@ impl Header {
 
 }
 
-
+impl Display for Header {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        for line in &self.lines {
+            writeln!(f, "{}", line)?;
+        }
+        writeln!(f,"")?;
+        Ok(())
+    }
+}
 
 impl FromStr for Header {
     type Err = NrrdError;
@@ -387,6 +468,7 @@ impl FromStr for Header {
             // magic should be the first line in the string
             if magic.is_none() {
                 magic = Some(Magic::from_str(raw_line)?);
+                lines.push(LineType::Magic(magic.unwrap()));
             }
 
             // stop reading if an empty line is encountered
@@ -594,6 +676,13 @@ pub fn read_tail(f:&mut File, bytes: &mut [u8]) -> usize {
 }
 
 
+pub fn write_raw(
+    f: &mut File,
+    payload: &[u8],
+) {
+    f.write_all(payload).expect("failed to write raw");
+}
+
 pub fn read_raw(
     f: &mut File,
     seek_to_raw: Option<u64>,
@@ -604,6 +693,15 @@ pub fn read_raw(
         f.seek(SeekFrom::Start(seek_to)).expect("seek to raw compressed data failed");
     }
     read_with_skip(f, bytes, bytes_to_skip)
+}
+
+
+pub fn write_gzip(
+    f: &mut File,
+    payload: &[u8],
+) {
+    let mut enc = GzEncoder::new(f,flate2::Compression::fast());
+    enc.write_all(payload).expect("failed to write to GZ");
 }
 
 pub fn read_gzip(
@@ -630,6 +728,14 @@ pub fn read_bzip2(
     }
     let mut dec = BzDecoder::new(&mut *f);
     read_with_skip(&mut dec, decompressed, bytes_to_skip)
+}
+
+pub fn write_bzip2(
+    f: &mut File,
+    payload: &[u8],
+) {
+    let mut enc = BzEncoder::new(f,bzip2::Compression::fast());
+    enc.write_all(payload).expect("failed to write to BZ");
 }
 
 pub fn read_with_skip<R:Read>(reader:&mut R, decompressed: &mut [u8], bytes_to_skip: usize) -> usize {
