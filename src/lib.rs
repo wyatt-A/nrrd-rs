@@ -1,5 +1,4 @@
-use std::any::TypeId;
-use std::cmp::PartialEq;
+use std::cmp::{min, PartialEq};
 use std::error::Error;
 use std::fmt::{Display, Formatter};
 use std::fs::File;
@@ -9,11 +8,11 @@ use std::num::ParseIntError;
 use std::path::{Path, PathBuf};
 use std::str::FromStr;
 use bytemuck::Pod;
-use bzip2::bufread::BzDecoder;
-use flate2::bufread::GzDecoder;
+use bzip2::read::BzDecoder;
 use regex::Regex;
 use sprintf::sprintf;
 use num_traits::{Euclid, NumCast, ToPrimitive};
+use flate2::read::GzDecoder;
 
 #[cfg(test)]
 mod tests {
@@ -64,176 +63,86 @@ mod tests {
 
 
     #[test]
-    fn read() {
-
+    fn read_all() {
         let nrrd = "test_nrrds/detached_single.nhdr";
-
-        let mut f = File::open(nrrd).unwrap();
-
-        let (bytes,offset) = read_until_blank(&mut f).unwrap();
-        let s = String::from_utf8(bytes).unwrap();
-        let hdr = Header::from_str(&s);
-
-
-        println!("{:?}",hdr);
-        println!("offset: {:?}",offset);
+        let hdr = read_nhdr(nrrd);
+        println!("{:?}", hdr);
+        println!("{:?}", hdr.resolve_data_files());
     }
 
 }
 
-pub struct NrrdReader {
-    /// path to header
-    file:PathBuf,
-    /// header info
-    header:Header,
-    /// bytes in header
-    header_offset:u64,
+
+pub fn read_nhdr(file_path:impl AsRef<Path>) -> Header {
+    let mut f = File::open(file_path).unwrap();
+    // read the file until the first blank line is encountered
+    let (bytes,..) = read_until_blank(&mut f).unwrap();
+    // convert bytes to string and parse header
+    let hdr_str = String::from_utf8(bytes).unwrap();
+    Header::from_str(&hdr_str).unwrap()
 }
 
-impl NrrdReader {
 
-    pub fn new(file:impl AsRef<Path>) -> Result<NrrdReader,NrrdError> {
-        let mut f = File::open(&file).map_err(|e|NrrdError::IOError(e))?;
-        let (h_bytes,header_offset) = read_until_blank(&mut f).map_err(|e|NrrdError::IOError(e))?;
-        let h_str = String::from_utf8(h_bytes).expect("invalid utf-8");
-        if header_offset.is_none() {
-            // did not encounter the blank line in nhdr
-            Err(NrrdError::NoBlankLine(h_str.clone()))?
-        }
-        // attempt to parse the header
-        let h = Header::from_str(&h_str)?;
-        Ok(
-            NrrdReader {
-                file:file.as_ref().to_path_buf(),
-                header:h,
-                header_offset: header_offset.unwrap_or(0)
-            }
-        )
-    }
+pub fn read_nrrd(file_path:impl AsRef<Path>) -> (Vec<u8>,Header) {
 
-    fn read_bytes(&self) -> Vec<u8> {
+    let mut f = File::open(&file_path).unwrap();
 
-        let n_elements: usize = self.header.sizes.iter().product();
-        let total_bytes = n_elements * self.header.type_.size();
+    // read the file until the first blank line is encountered
+    let (bytes,..) = read_until_blank(&mut f).unwrap();
+    // convert bytes to string and parse header
+    let hdr_str = String::from_utf8(bytes).unwrap();
+    let hdr = Header::from_str(&hdr_str).unwrap();
 
-        let mut bytes = vec![0; total_bytes];
+    // determine the total number of bytes we need to extract for the array
+    let total_bytes = hdr.sizes.iter().product::<usize>() * hdr.type_.size();
 
-        match self.header.resolve_data_files() {
+    let mut bytes = vec![0u8; total_bytes];
 
-            None => {
-                // this is the attached header case
-            }
+    let encoding = hdr.encoding;
+    let line_skip = hdr.line_skip;
+    let read_from_end = hdr.byte_skip < 0;
+    let byte_skip = if read_from_end { 0 } else {hdr.byte_skip.abs()} as usize;
 
-            Some((files,sub_dim)) => {
-                // this is the detached case
-                let (bytes_per_file,remainder) = total_bytes.div_rem_euclid(&files.len());
-                assert_eq!(remainder,0,"total bytes not divisible by number of files");
-
-                let line_skip = self.header.line_skip;
-                let byte_skip = self.header.byte_skip;
-
-                match self.header.encoding {
-                    Encoding::raw => {
-
-                        for p in files {
-                            let mut f = File::open(p).unwrap();
-
-                        }
-
-
-                    }
-                    Encoding::txt => {}
-                    Encoding::hex => {}
-                    Encoding::rawgz => {}
-                    Encoding::rawbz2 => {}
-                }
-
-            }
-
-        }
-
-
-        let (files,header_offset) = if let Some((files,..)) = self.header.resolve_data_files() {
-            (files,0) // assume the header offset is 0 for detached data files
-        }else {
-            (vec![self.file.clone()],self.header_offset)
-        };
-
-        // determine the number of bytes to read
-        let n: usize = self.header.sizes.iter().product();
-        let total_bytes = self.header.type_.size() * n;
-
-        let (bytes_per_file,remainder) = total_bytes.div_rem_euclid(&files.len());
-        assert_eq!(remainder,0);
-
-        let mut bytes = vec![0u8;total_bytes];
-
-        let byte_skip = self.header.byte_skip;
-
-        if byte_skip == -1 {
-            // we have to read backward from EOF
-            if self.header.encoding != Encoding::raw {
-                panic!("byte skip of -1 is only valid for raw encodings")
-            }
-            // read data from EOF
-            bytes.chunks_exact_mut(bytes_per_file).zip(&files).for_each(|(chunk,file)| {
-                let bytes_read = read_tail(&file,chunk).expect("failed to read");
-                if bytes_read != chunk.len() {
-                    panic!("failed to fill buffer from {}",file.display());
-                }
+    if let Some((detached_files,..)) = hdr.resolve_data_files() {
+        let (bytes_per_file,r) = total_bytes.div_rem_euclid(&detached_files.len());
+        assert_eq!(r,0,"total bytes not divisible my number of files");
+        bytes.chunks_exact_mut(bytes_per_file)
+            .zip(detached_files)
+            .for_each(|(byte_chunk,file)|{
+                let abs_path = if file.is_relative() {
+                    file_path.as_ref().join(file)
+                }else {
+                    file.to_owned()
+                };
+                let mut f = File::open(abs_path).unwrap();
+                read_bytes(&mut f,encoding,read_from_end,line_skip,byte_skip,byte_chunk);
             });
-            return Ok(bytes)
-        }
-
-        // assume byte skip is always positive or 0 if not -1
-        let byte_skip = self.header.byte_skip.abs() as usize;
-        let line_skip = self.header.line_skip;
-
-        match self.header.encoding {
-
-            Encoding::raw => {
-                bytes.chunks_exact_mut(bytes_per_file).zip(&files).for_each(|(chunk,file)| {
-                    let bytes_read = read_with_skips(&file,header_offset,line_skip,byte_skip,chunk).expect("failed to read");
-                    if bytes_read != chunk.len() {
-                        panic!("failed to fill buffer from {}",file.display());
-                    }
-                });
-                Ok(bytes)
-            }
-
-            Encoding::rawgz => {
-                bytes.chunks_exact_mut(bytes_per_file).zip(&files).for_each(|(chunk,file)| {
-                    let bytes_read = read_with_skips_gz(&file,header_offset,line_skip,byte_skip,chunk).expect("failed to read");
-                    if bytes_read != chunk.len() {
-                        panic!("failed to fill buffer from {}",file.display());
-                    }
-                });
-                Ok(bytes)
-            }
-
-            Encoding::rawbz2 => {
-                bytes.chunks_exact_mut(bytes_per_file).zip(&files).for_each(|(chunk,file)| {
-                    let bytes_read = read_with_skips_gz(&file,header_offset,line_skip,byte_skip,chunk).expect("failed to read");
-                    if bytes_read != chunk.len() {
-                        panic!("failed to fill buffer from {}",file.display());
-                    }
-                });
-                Ok(bytes)
-            }
-
-            _ => panic!("unsupported encoding for now: {:?}",self.header.encoding)
-        }
-
+    }else {
+        // attached header condition
+        read_bytes(&mut f,encoding,read_from_end,line_skip,byte_skip,&mut bytes);
     }
 
+    (bytes,hdr)
+}
 
-    pub fn read_all<T:ToPrimitive>(&self) -> Result<Vec<T>,NrrdError> {
-        todo!()
-    }
-
-
+/// helper function to read bytes from a file while accounting for different encodings and compression
+pub fn read_bytes(f:&mut File,encoding:Encoding,read_from_end:bool,line_skip:usize,byte_skip:usize,bytes: &mut [u8]) {
+    skip_lines(f,line_skip);
+    match encoding {
+        Encoding::raw => {
+            if read_from_end {
+                read_tail(f,bytes)
+            }else {
+                read_raw(f, None, bytes, byte_skip)
+            }
+        }
+        Encoding::rawgz => read_gzip(f, None, bytes, byte_skip),
+        Encoding::rawbz2 => read_bzip2(f, None, bytes, byte_skip),
+        _=> panic!("text and hex not supported for now"),
+    };
 
 }
+
 
 
 #[derive(Debug)]
@@ -576,50 +485,178 @@ impl FromStr for Header {
     }
 }
 
-/// read the nrrd or nhdr until a blank line is reached (the end of the header section). This returns
-/// the bytes read and the byte offset to the next byte in the file. If a blank line is not encountered,
-/// None is returned for the byte offset
-fn read_until_blank(file:&mut File) -> io::Result<(Vec<u8>, Option<u64>)> {
+// /// read the nrrd or nhdr until a blank line is reached (the end of the header section). This returns
+// /// the bytes read and the byte offset to the next byte in the file. If a blank line is not encountered,
+// /// None is returned for the byte offset
+// fn read_until_blank(file:&mut File) -> io::Result<(Vec<u8>, Option<u64>)> {
+//     let mut rdr  = BufReader::new(file);
+//     let mut line = Vec::new();   // reused buffer for each line
+//     let mut acc  = Vec::new();   // accumulator for all bytes before blank line
+//     let mut pos: u64 = 0;        // bytes consumed so far
+//     let mut offset_after_blank = None;
+//
+//     while rdr.read_until(b'\n', &mut line)? != 0 {
+//         let is_blank = line == b"\n" || line == b"\r\n";
+//         if is_blank {
+//             // first byte AFTER the blank line:
+//             offset_after_blank = Some(pos + line.len() as u64);
+//             break;
+//         }
+//         acc.extend_from_slice(&line);
+//         pos += line.len() as u64;
+//         line.clear();
+//     }
+//
+//     Ok((acc, offset_after_blank))
+// }
+
+fn read_until_blank(file: &mut File) -> io::Result<(Vec<u8>, Option<u64>)> {
+    let start_pos = file.stream_position()?;          // where we began
     let mut rdr  = BufReader::new(file);
-    let mut line = Vec::new();   // reused buffer for each line
-    let mut acc  = Vec::new();   // accumulator for all bytes before blank line
-    let mut pos: u64 = 0;        // bytes consumed so far
-    let mut offset_after_blank = None;
+    let mut line = Vec::new();
+    let mut acc  = Vec::new();
+    let mut pos: u64 = 0;
+    let mut off_after_blank = None;
 
     while rdr.read_until(b'\n', &mut line)? != 0 {
         let is_blank = line == b"\n" || line == b"\r\n";
+        pos += line.len() as u64;
+
         if is_blank {
-            // first byte AFTER the blank line:
-            offset_after_blank = Some(pos + line.len() as u64);
+            off_after_blank = Some(pos);              // relative to start_pos
             break;
         }
+
         acc.extend_from_slice(&line);
-        pos += line.len() as u64;
         line.clear();
     }
 
-    Ok((acc, offset_after_blank))
+    // Put the underlying File cursor exactly where we want it
+    let unread = rdr.buffer().len();
+    let file = rdr.into_inner();                      // back to &mut File
+
+    // First, undo the unread buffered bytes (BufReader over-read)
+    if unread > 0 {
+        file.seek(SeekFrom::Current(-(unread as i64)))?;
+    }
+
+    // Then, if we found a blank line, seek to its end; otherwise to EOF we consumed
+    if let Some(rel_off) = off_after_blank {
+        file.seek(SeekFrom::Start(start_pos + rel_off))?;
+    } else {
+        file.seek(SeekFrom::Start(start_pos + pos))?;
+    }
+
+    Ok((acc, off_after_blank))
 }
 
-pub fn read_tail<P: AsRef<Path>>(path: P, buf: &mut [u8]) -> io::Result<usize> {
-    // 1. open the file
-    let mut file = File::open(path)?;
+/// advances the file cursor to the byte just after the nth line
+pub fn skip_lines(f: &mut File, n_lines: usize) -> usize {
+    let mut rdr = BufReader::new(f);
+    let mut buf = Vec::new();
+    let mut bytes = 0usize;
 
-    // 2. how many bytes do we *need* and how many are *there*?
-    let file_len = file.metadata()?.len(); // u64
-    let want = buf.len() as u64;
+    for _ in 0..n_lines {
+        buf.clear();
+        let n = rdr.read_until(b'\n', &mut buf).expect("failed to read line");
+        if n == 0 { break; } // EOF before hitting n_lines
+        bytes += n;
+    }
+
+    // Rewind by what BufReader buffered but we didn't consume
+    let unread = rdr.buffer().len();
+    let inner = rdr.into_inner(); // gives us back &mut File
+    if unread > 0 {
+        inner.seek(SeekFrom::Current(-(unread as i64))).expect("failed to seek");
+    }
+    bytes
+}
+
+pub fn read_tail(f:&mut File, bytes: &mut [u8]) -> usize {
+
+    // 1. how many bytes do we *need* and how many are *there*?
+    let file_len = f.metadata().expect("failed to get file metadata").len();
+    let want = bytes.len() as u64;
     if want == 0 || file_len == 0 {
-        return Ok(0);
+        return 0
     }
 
     let to_read = want.min(file_len);              // never larger than the file
     let offset = -(to_read as i64);                // safe: to_read ≤ file_len ≤ i64::MAX
 
-    // 3. jump to the start of the “tail” segment
-    file.seek(SeekFrom::End(offset))?;
+    // 2. jump to the start of the “tail” segment
+    f.seek(SeekFrom::End(offset)).expect("failed to seek backward from EOF");
 
-    // 4. read exactly `to_read` bytes
-    file.read_exact(&mut buf[..to_read as usize])?;
+    // 3. read exactly `to_read` bytes
+    f.read_exact(&mut bytes[..to_read as usize]).expect("failed to read file");
 
-    Ok(to_read as usize)
+    to_read as usize
+}
+
+
+pub fn read_raw(
+    f: &mut File,
+    seek_to_raw: Option<u64>,
+    bytes: &mut [u8],
+    bytes_to_skip: usize,
+) -> usize {
+    if let Some(seek_to) = seek_to_raw {
+        f.seek(SeekFrom::Start(seek_to)).expect("seek to raw compressed data failed");
+    }
+    read_with_skip(f, bytes, bytes_to_skip)
+}
+
+pub fn read_gzip(
+    f: &mut File,
+    seek_to_raw_compressed: Option<u64>,
+    decompressed: &mut [u8],
+    bytes_to_skip: usize,
+) -> usize{
+    if let Some(seek_to) = seek_to_raw_compressed {
+        f.seek(SeekFrom::Start(seek_to)).expect("seek to raw compressed data failed");
+    }
+    let mut dec = GzDecoder::new(&mut *f);
+    read_with_skip(&mut dec, decompressed, bytes_to_skip)
+}
+
+pub fn read_bzip2(
+    f: &mut File,
+    seek_to_raw_compressed: Option<u64>,
+    decompressed: &mut [u8],
+    bytes_to_skip: usize,
+) -> usize{
+    if let Some(seek_to) = seek_to_raw_compressed {
+        f.seek(SeekFrom::Start(seek_to)).expect("seek to raw compressed data failed");
+    }
+    let mut dec = BzDecoder::new(&mut *f);
+    read_with_skip(&mut dec, decompressed, bytes_to_skip)
+}
+
+pub fn read_with_skip<R:Read>(reader:&mut R, decompressed: &mut [u8], bytes_to_skip: usize) -> usize {
+    // Discard the first `bytes_to_skip` bytes of the stream
+    if bytes_to_skip > 0 {
+        let mut skipped = 0usize;
+        let mut tmp = [0u8; 8 * 1024];
+        while skipped < bytes_to_skip {
+            let need = min(tmp.len(), bytes_to_skip - skipped);
+            let n = reader.read(&mut tmp[..need]).expect("failed to read from reader");
+            if n == 0 {
+                panic!("reached EOF while skipping")
+            }
+            skipped += n;
+        }
+    }
+
+    // Now read into the provided buffer.
+    let mut written = 0usize;
+    while written < decompressed.len() {
+        let n = reader.read(&mut decompressed[written..]).expect("failed to read from reader");
+        if n == 0 {
+            break; // EOF of decompressed stream
+        }
+        written += n;
+    }
+
+    written
+
 }
