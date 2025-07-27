@@ -1,3 +1,5 @@
+mod header_defs;
+
 use std::cmp::{min, PartialEq};
 use std::collections::HashSet;
 use std::env::current_dir;
@@ -17,6 +19,7 @@ use sprintf::sprintf;
 use num_traits::{Euclid, NumCast, ToPrimitive};
 use flate2::read::GzDecoder;
 use flate2::write::GzEncoder;
+use crate::header_defs::Magic;
 
 #[cfg(test)]
 mod tests {
@@ -288,26 +291,6 @@ impl Display for NrrdError {
 
 impl Error for NrrdError {}
 
-#[derive(Debug,Clone,Copy)]
-struct Magic {
-    pub version: u8,
-}
-
-impl FromStr for Magic {
-    type Err = NrrdError;
-
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
-        let idx = s.find("NRRD").ok_or(NrrdError::NrrdMagic)?;
-        let version = s[idx+4..].trim().parse::<u8>().map_err(|_| NrrdError::NrrdMagic)?;
-        Ok(Magic{version})
-    }
-}
-
-impl Display for Magic {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}", format!("NRRD000{}", self.version))
-    }
-}
 
 #[derive(Debug,Clone)]
 enum LineType {
@@ -328,106 +311,11 @@ impl Display for LineType {
     }
 }
 
-#[derive(Debug,Clone,Copy,PartialEq,Eq)]
-#[allow(non_camel_case_types)]
-enum DType {
-    int8,
-    uint8,
-    int16,
-    uint16,
-    int32,
-    uint32,
-    int64,
-    uint64,
-    f32,
-    f64,
-    Block,
-}
 
-impl DType {
-    pub fn size(&self) -> usize {
-        match self {
-            DType::int8 => size_of::<i8>(),
-            DType::uint8 => size_of::<u8>(),
-            DType::int16 => size_of::<i16>(),
-            DType::uint16 => size_of::<u16>(),
-            DType::int32 => size_of::<i32>(),
-            DType::uint32 => size_of::<u32>(),
-            DType::int64 => size_of::<i64>(),
-            DType::uint64 => size_of::<u64>(),
-            DType::f32 => size_of::<f32>(),
-            DType::f64 => size_of::<f64>(),
-            DType::Block => 1, // this needs to be multiplied by block size to be valid
-        }
-    }
-}
 
-impl FromStr for DType {
-    type Err = NrrdError;
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
-        use DType::*;
-        let t = match s {
-            "signed char" | "int8" | "int8_t" => int8,
-            "uchar" | "unsigned char" | "uint8" | "uint8_t" => uint8,
-            "short" | "short int" | "signed short" | "signed short int" | "int16" | "int16_t" => int16,
-            "ushort" | "unsigned short" | "unsigned short int" | "uint16" | "uint16_t"  => uint16,
-            "int" | "signed int" | "int32" | "int32_t" => int32,
-            "uint" | "unsigned int" | "uint32" | "uint32_t" => uint32,
-            "longlong" | "long long" | "long long int" | "signed long long" | "signed long long int" | "int64" | "int64_t" => int64,
-            "ulonglong" | "unsigned long long" | "unsigned long long int" | "uint64" | "uint64_t" => uint64,
-            "float" => f32,
-            "double" => f64,
-            "block" => Block,
-            _=> Err(NrrdError::UnknownDType)?
-        };
-        Ok(t)
-    }
-}
 
-#[derive(Debug,PartialEq,Eq,Clone,Copy)]
-#[allow(non_camel_case_types)]
-pub enum Encoding {
-    raw,
-    txt,
-    hex,
-    rawgz,
-    rawbz2,
-}
 
-impl FromStr for Encoding {
-    type Err = NrrdError;
 
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
-        use Encoding::*;
-        let e = match s.trim() {
-            "raw" => raw,
-            "txt" | "text" | "ascii" => txt,
-            "gz" | "gzip" => rawgz,
-            "bz2" | "bzip2" =>  rawbz2,
-            "hex" => hex,
-            _=> Err(NrrdError::UnknownEncoding)?
-        };
-        Ok(e)
-    }
-}
-
-impl Display for Encoding {
-    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Encoding::raw => write!(f,"raw"),
-            Encoding::txt => write!(f,"txt"),
-            Encoding::hex => write!(f,"hex"),
-            Encoding::rawgz => write!(f,"gzip"),
-            Encoding::rawbz2 => write!(f,"bzip2"),
-        }
-    }
-}
-
-#[derive(Debug,PartialEq,Eq,Clone,Copy)]
-pub enum Endian {
-    Big,
-    Little,
-}
 
 #[derive(Debug,Clone)]
 struct Header {
