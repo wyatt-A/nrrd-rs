@@ -12,7 +12,7 @@ use std::str::FromStr;
 use bytemuck::Pod;
 use bzip2::read::BzDecoder;
 use bzip2::write::BzEncoder;
-use regex::Regex;
+use regex::{Regex, RegexSet};
 use sprintf::sprintf;
 use num_traits::{Euclid, NumCast, ToPrimitive};
 use flate2::read::GzDecoder;
@@ -81,7 +81,7 @@ mod tests {
         println!("{:?}", hdr);
         println!("{:?}", payload.len());
 
-        write_nrrd_payload_detached("B:/ProjectSpace/wa41/test_nrrds/Reg_1500_avg_copy",&hdr,&payload);
+        write_nrrd_payload("B:/ProjectSpace/wa41/test_nrrds/Reg_1500_avg_copy", &hdr, &payload, true);
 
     }
 
@@ -97,6 +97,47 @@ pub fn read_nhdr(file_path:impl AsRef<Path>) -> Header {
     Header::from_str(&hdr_str).unwrap()
 }
 
+pub fn read_nrrd_data_as<T:NumCast + Pod>(file_path:impl AsRef<Path>) -> (Vec<T>, Header) {
+
+    let (bytes,hdr) = read_nrrd_payload(file_path);
+
+
+    match hdr.endian {
+        Endian::Big => {
+
+            match hdr.type_ {
+                DType::int8 => {
+                    let x:Vec<T> = bytemuck::cast_slice::<u8, i8>(&bytes).iter()
+                        .map(|x| T::from(x)).collect();
+                    return (x,hdr);
+                },
+                DType::uint8 => {
+                    let x:Vec<T> = bytes.iter()
+                        .map(|x| T::from(x)).collect();
+                    return (x,hdr);
+                }
+                DType::int16 => {
+                    
+                }
+                DType::uint16 => {}
+                DType::int32 => {}
+                DType::uint32 => {}
+                DType::int64 => {}
+                DType::uint64 => {}
+                DType::f32 => {}
+                DType::f64 => {}
+                DType::Block => {}
+            }
+        }
+        Endian::Little => {
+
+        }
+    }
+
+
+
+    todo!()
+}
 
 pub fn read_nrrd_payload(file_path:impl AsRef<Path>) -> (Vec<u8>, Header) {
 
@@ -141,48 +182,62 @@ pub fn read_nrrd_payload(file_path:impl AsRef<Path>) -> (Vec<u8>, Header) {
 }
 
 
-pub fn write_nrrd_payload_detached(file_path:impl AsRef<Path>, hdr:&Header, payload:&[u8]) {
+pub fn write_nrrd_payload(file_path:impl AsRef<Path>, ref_hdr:&Header, payload:&[u8], attached:bool) {
 
-    let mut hdr =  hdr.clone();
+    let mut hdr =  ref_hdr.clone();
 
-    let idx = hdr.lines.iter().position(|line|{
-        match line {
-            LineType::Field { id,.. } => {
-                id == "data file" || id == "datafile"
+    if attached {
+        hdr.remove_data_file();
+        hdr.set_line_skip(0);
+        hdr.set_byte_skip(0);
+
+        let mut f = File::create(file_path.as_ref().with_extension("nrrd")).unwrap();
+        f.write_all(hdr.to_string().as_bytes()).unwrap();
+
+        match hdr.encoding {
+            Encoding::raw => write_raw(&mut f,payload),
+            Encoding::rawgz => write_gzip(&mut f,payload),
+            Encoding::rawbz2 => write_bzip2(&mut f,payload),
+            _=> panic!("not yet implemented")
+        }
+
+    }else {
+
+        let detached_name = match hdr.encoding {
+            Encoding::raw => {
+                let path = file_path.as_ref().with_extension("raw");
+                let mut f = File::create(&path).unwrap();
+                write_raw(&mut f,payload);
+                path.file_name().unwrap().to_str().unwrap().to_string()
             }
-            _ => return false,
-        }
-    });
+            Encoding::rawgz => {
+                let path = file_path.as_ref().with_extension("raw.gz");
+                let mut f = File::create(&path).unwrap();
+                write_gzip(&mut f,payload);
+                path.file_name().unwrap().to_str().unwrap().to_string()
+            }
+            Encoding::rawbz2 => {
+                let path = file_path.as_ref().with_extension("raw.bz2");
+                let mut f = File::create(&path).unwrap();
+                write_bzip2(&mut f,payload);
+                path.file_name().unwrap().to_str().unwrap().to_string()
+            }
+            _=> panic!("not yet implemented"),
+        };
 
-    let fname = file_path.as_ref().file_name().unwrap().to_str().unwrap();
+        hdr.set_data_file(&detached_name);
+        hdr.set_line_skip(0);
+        hdr.set_byte_skip(0);
 
-    let detached_filename = match hdr.encoding {
-        Encoding::raw => Path::new(fname).with_extension("raw"),
-        Encoding::rawgz => Path::new(fname).with_extension("raw.gz"),
-        Encoding::rawbz2 => Path::new(fname).with_extension("raw.bz2"),
-        _=> panic!("not yet implemented"),
-    };
+        let mut f = File::create(file_path.as_ref().with_extension("nhdr")).unwrap();
+        f.write_all(hdr.to_string().as_bytes()).unwrap();
 
-    if let Some(idx) = idx {
-        hdr.lines.remove(idx);
     }
-    hdr.lines.push(LineType::Field {id: "datafile".to_string(),desc:detached_filename.display().to_string() });
 
-    match hdr.encoding {
-        Encoding::raw => {
-            let mut f = File::create(file_path.as_ref().with_extension("raw")).unwrap();
-            write_raw(&mut f,payload)
-        }
-        Encoding::rawgz => {
-            let mut f = File::create(file_path.as_ref().with_extension("raw.gz")).unwrap();
-            write_gzip(&mut f,payload)
-        }
-        Encoding::rawbz2 => {
-            let mut f = File::create(file_path.as_ref().with_extension("raw.bz2")).unwrap();
-            write_bzip2(&mut f,payload);
-        }
-        _=> panic!("not yet implemented"),
-    }
+
+
+
+
 
 }
 
@@ -356,6 +411,24 @@ impl FromStr for Encoding {
     }
 }
 
+impl Display for Encoding {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Encoding::raw => write!(f,"raw"),
+            Encoding::txt => write!(f,"txt"),
+            Encoding::hex => write!(f,"hex"),
+            Encoding::rawgz => write!(f,"gzip"),
+            Encoding::rawbz2 => write!(f,"bzip2"),
+        }
+    }
+}
+
+#[derive(Debug,PartialEq,Eq,Clone,Copy)]
+pub enum Endian {
+    Big,
+    Little,
+}
+
 #[derive(Debug,Clone)]
 struct Header {
     pub magic: Magic,
@@ -364,6 +437,7 @@ struct Header {
     pub sizes: Vec<usize>,
     pub type_: DType,
     pub encoding: Encoding,
+    pub endian: Endian,
     pub line_skip:usize,
     pub byte_skip:isize,
     pub block_size: Option<usize>,
@@ -373,6 +447,83 @@ struct Header {
 
 impl Header {
 
+    pub fn set_data_file(&mut self, data_file:&str) {
+        if !self.set_field(
+                RegexSet::new(&["datafile","data file"]).unwrap(),
+                data_file,
+            ) {
+            self.lines.push(
+                LineType::Field {id:"datafile".to_string(),desc:data_file.to_string()}
+            )
+        }
+    }
+
+    pub fn remove_data_file(&mut self) {
+        self.remove_field(RegexSet::new(&["datafile","data file"]).unwrap());
+    }
+
+    pub fn set_byte_skip(&mut self, byte_skip:usize) {
+        if !self.set_field(
+                RegexSet::new(&["byte skip","byteskip"]).unwrap(),
+                &byte_skip.to_string(),
+            ) {
+            self.lines.insert(
+                self.lines.len() - 2,
+                LineType::Field {id:"byteskip".to_string(),desc:byte_skip.to_string()}
+            )
+        }
+
+    }
+
+    pub fn set_line_skip(&mut self, line_skip:usize) {
+        if !self.set_field(
+                RegexSet::new(&["line skip","lineskip"]).unwrap(),
+                &line_skip.to_string(),
+            ) {
+            self.lines.insert(
+                self.lines.len() - 2,
+                LineType::Field {id:"lineskip".to_string(),desc:line_skip.to_string()}
+            )
+        }
+    }
+
+    pub fn set_encoding(&mut self, enc:Encoding) {
+        if !self.set_field(
+            RegexSet::new(&["encoding"]).unwrap(),
+            &enc.to_string(),
+        ) {
+            self.lines.insert(
+                self.lines.len() - 2,
+                LineType::Field {id:"encoding".to_string(),desc:enc.to_string()}
+            )
+        }
+    }
+    fn set_field(&mut self,field_pat:RegexSet,descr:&str) -> bool {
+        let mut set = false;
+        self.lines.iter_mut().for_each(|line|{
+            match line {
+                LineType::Field {id,desc} => {
+                    if field_pat.is_match(id) {
+                        *desc = descr.to_string();
+                        set = true;
+                    }
+                },
+                _ => {}
+            }
+        });
+        set
+    }
+
+    fn remove_field(&mut self,field_pat:RegexSet) {
+        self.lines.retain(|line| {
+            match line {
+                LineType::Field {id,..} => {
+                    !field_pat.is_match(id)
+                },
+                _ => true
+            }
+        });
+    }
 
     pub fn resolve_data_files(&self) -> Option<(Vec<PathBuf>,Option<usize>)> {
 
@@ -454,6 +605,7 @@ impl FromStr for Header {
         let mut dimension = None;
         let mut type_ = None;
         let mut encoding = None;
+        let mut endian = None;
         let mut sizes = vec![];
         let mut data_file_list = vec![];
         let mut block_size = None;
@@ -512,6 +664,14 @@ impl FromStr for Header {
                     encoding = Some(Encoding::from_str(desc.trim())?);
                 }
 
+                if id.trim() == "endian" {
+                    if desc == "little" {
+                        endian = Some(Endian::Little);
+                    }else if desc == "big" {
+                        endian = Some(Endian::Big);
+                    }
+                }
+
                 if id.trim() == "blocksize" || id.trim() == "block size" {
                     block_size = Some(desc.trim().parse::<usize>().map_err(|_| NrrdError::BlockSizeParse)?);
                 }
@@ -546,6 +706,7 @@ impl FromStr for Header {
         let dimension = dimension.ok_or(NrrdError::Dimension)?;
         let type_ = type_.ok_or(NrrdError::UnknownDType)?;
         let encoding = encoding.ok_or(NrrdError::UnknownEncoding)?;
+        let endian = endian.expect("unknown endian");
 
         let byte_skip = byte_skip.unwrap_or(0);
         let line_skip = line_skip.unwrap_or(0);
@@ -562,7 +723,7 @@ impl FromStr for Header {
             Err(NrrdError::ZeroSize)?
         }
 
-        Ok(Header {magic, lines, dimension, sizes, type_, encoding, line_skip, byte_skip, block_size, data_file_pattern: data_file, data_file_list })
+        Ok(Header {magic, lines, dimension, sizes, type_, encoding, endian, line_skip, byte_skip, block_size, data_file_pattern: data_file, data_file_list })
 
     }
 }
