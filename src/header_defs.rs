@@ -200,34 +200,45 @@ impl Display for SpaceUnits {
  ****************************/
 
 pub struct NrrdVec {
-    x:f64,
-    y:f64,
-    z:f64,
+    v: Vec<f64>
 }
 
 impl FromStr for NrrdVec {
     type Err = ();
     fn from_str(s: &str) -> Result<Self,Self::Err> {
 
-        let re = Regex::new(r"^\(\s*(-?\d+(?:\.\d+)?)\s*,\s*(-?\d+(?:\.\d+)?)\s*,\s*(-?\d+(?:\.\d+)?)\s*\)").unwrap();
-        let caps = re.captures(s.trim()).expect("invalid vector pattern");
-        let x_str = caps.get(1).expect("failed to capture x from vector").as_str();
-        let y_str = caps.get(2).expect("failed to capture y from vector").as_str();;
-        let z_str = caps.get(3).expect("failed to capture z from vector").as_str();;
+        let trimmed = s.trim();
 
-        Ok(
-            NrrdVec {
-                x:x_str.parse::<f64>().expect("failed to parse x value"),
-                y:y_str.parse::<f64>().expect("failed to parse y value"),
-                z:z_str.parse::<f64>().expect("failed to parse z value"),
-            }
-        )
+        if !(trimmed.starts_with('(') && trimmed.ends_with(')')) {
+            panic!("invalid NRD vector: {}", s);
+        }
+
+        // Strip outer parens
+        let inner = &trimmed[1..trimmed.len() - 1];
+        if inner.is_empty() {
+            panic!("empty vector entry")
+        }
+
+        let v = inner
+            .split(',')
+            .map(|piece| {
+                if piece.is_empty() {
+                    panic!("empty vector entry")
+                }
+                piece
+                    .parse::<f64>().expect("failed to parse vector entry to f64")
+            })
+            .collect();
+
+        Ok(NrrdVec{v})
+
     }
 }
 
 impl Display for NrrdVec {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        write!(f,"({:.17},{:.17},{:.17})",self.x,self.y,self.z)
+        let s:Vec<_> = self.v.iter().map(|x| format!("{:.17}", x)).collect();
+        write!(f,"({})",s.join(","))
     }
 }
 
