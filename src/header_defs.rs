@@ -2,8 +2,7 @@ use std::fmt::{write, Display, Formatter};
 use std::path::{Path, PathBuf};
 use std::str::FromStr;
 use regex::{Regex, RegexSet, SubCaptureMatches};
-use crate::NrrdError;
-use crate::NrrdError::Dimension;
+use sprintf::sprintf;
 
 /// Header Definition
 pub trait HeaderDef {
@@ -14,6 +13,8 @@ pub trait HeaderDef {
         RegexSet::new(pats).unwrap()
             .is_match(s)
     }
+
+
 
     /// return the byte index in 's' of the first character after the pattern match
     fn idx(s:&str) -> Option<usize> {
@@ -57,6 +58,87 @@ impl Display for Magic {
         write!(f, "{}", format!("NRRD000{}", self.version))
     }
 }
+
+/******************************
+ ********** Comment *********
+ ****************************/
+#[derive(Debug,Clone)]
+pub struct Comment {
+    pub val: String,
+}
+
+impl HeaderDef for Comment {
+    fn patterns<'a>() -> &'a [&'a str] {
+        &["#"]
+    }
+}
+
+impl FromStr for Comment {
+    type Err = ();
+    fn from_str(s: &str) -> Result<Self,()> {
+        let idx = Comment::idx(s).unwrap();
+        // comment starts one character after '#'
+        if idx+1 >= s.len() {
+            // comment is empty
+            Err(())
+        }else {
+            let val = s[idx+1..].to_string();
+            Ok(Comment{val})
+        }
+    }
+}
+
+impl Display for Comment {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{} {}",Self::patterns()[0], self.val)
+    }
+}
+
+/******************************
+ ********** KEY-VALUE *********
+ ****************************/
+
+#[derive(Debug,Clone)]
+pub struct Value {
+    pub val: String,
+}
+
+impl HeaderDef for Value {
+    fn patterns<'a>() -> &'a [&'a str] {
+        &[":="]
+    }
+}
+
+impl Value {
+    /// returns true if the header line matches the key-value pattern
+    pub fn matches_key_value(s:&str) -> bool {
+        let pats = Self::patterns();
+        RegexSet::new(pats).unwrap()
+            .is_match(s)
+    }
+
+    /// extracts the key from the key-value header line
+    pub fn key(s:&str) -> String {
+        let idx = Value::idx(s).unwrap();
+        s[0..idx - ":=".len()].to_string()
+    }
+}
+
+impl FromStr for Value {
+    type Err = ();
+    fn from_str(s: &str) -> Result<Self,()> {
+        let idx = Value::idx(s).unwrap();
+        let val = s[idx..].to_string();
+        Ok(Value{val})
+    }
+}
+
+impl Display for Value {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}{}", Self::patterns()[0], self.val)
+    }
+}
+
 
 /******************************
  ************ SPACE ***********
@@ -133,6 +215,7 @@ impl Display for Space {
  ***** SPACE DIMENSION ********
  ****************************/
 
+#[derive(Debug,Clone)]
 pub struct SpaceDimension {
     dim:usize
 }
@@ -155,7 +238,7 @@ impl FromStr for SpaceDimension {
 
 impl Display for SpaceDimension {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}{}",self.dim,Self::patterns()[0])
+        write!(f, "{}{}",Self::patterns()[0],self.dim)
     }
 }
 
@@ -163,6 +246,7 @@ impl Display for SpaceDimension {
  *********** SPACE UNITS ***********
  ****************************/
 
+#[derive(Debug,Clone)]
 pub struct SpaceUnits {
     units: Vec<String>
 }
@@ -176,7 +260,7 @@ impl HeaderDef for SpaceUnits {
 impl FromStr for SpaceUnits {
     type Err = ();
     fn from_str(s: &str) -> Result<Self, Self::Err> {
-        let idx = Labels::idx(s).unwrap();
+        let idx = SpaceUnits::idx(s).unwrap();
         let s = s[idx..].trim();
         let re = Regex::new(r#""([^"]+)""#).unwrap();
         let units = re.find_iter(s)
@@ -199,6 +283,7 @@ impl Display for SpaceUnits {
  ********* NRRD VEC **********
  ****************************/
 
+#[derive(Debug,Clone)]
 pub struct NrrdVec {
     v: Vec<f64>
 }
@@ -246,6 +331,7 @@ impl Display for NrrdVec {
  ********* SPACE ORIGIN *******
  ****************************/
 
+#[derive(Debug,Clone)]
 pub struct SpaceOrigin {
     origin: NrrdVec,
 }
@@ -274,6 +360,8 @@ impl Display for SpaceOrigin {
 /******************************
  ****** SPACE DIRECTIONS ******
  ****************************/
+
+#[derive(Debug,Clone)]
 pub struct SpaceDirections {
     directions:Vec<Option<NrrdVec>>,
 }
@@ -348,29 +436,30 @@ impl Display for MeasurementFrame {
  ******** DIMENSION ***********
  ****************************/
 
-pub struct Dim {
+#[derive(Debug,Clone)]
+pub struct Dimension {
     dim:usize,
 }
 
-impl HeaderDef for Dim {
+impl HeaderDef for Dimension {
     fn patterns<'a>() -> &'a [&'a str] {
         &["dimension: "]
     }
 }
 
-impl FromStr for Dim {
+impl FromStr for Dimension {
     type Err = ();
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
-        let idx = Dim::idx(s).unwrap();
+        let idx = Dimension::idx(s).unwrap();
         let dim = s[idx..].trim().parse::<usize>().unwrap();
-        Ok(Dim{dim})
+        Ok(Dimension {dim})
     }
 }
 
-impl Display for Dim {
+impl Display for Dimension {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}{}",self.dim,Self::patterns()[0])
+        write!(f, "{}{}",Self::patterns()[0],self.dim)
     }
 }
 
@@ -380,7 +469,7 @@ impl Display for Dim {
 
 #[derive(Debug,Clone,Copy,PartialEq,Eq)]
 #[allow(non_camel_case_types)]
-enum DType {
+pub enum DType {
     int8,
     uint8,
     int16,
@@ -464,8 +553,15 @@ impl Display for DType {
  ******* BLOCKSIZE ***********
  ****************************/
 
+#[derive(Debug,Clone)]
 pub struct BlockSize {
     bs: usize,
+}
+
+impl BlockSize {
+    pub fn size(&self) -> usize {
+        self.bs
+    }
 }
 
 impl HeaderDef for BlockSize {
@@ -485,7 +581,7 @@ impl FromStr for BlockSize {
 
 impl Display for BlockSize {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}{}", self.bs,Self::patterns()[0])
+        write!(f, "{}{}",Self::patterns()[0],self.bs)
     }
 }
 
@@ -511,7 +607,7 @@ impl HeaderDef for Encoding {
 
 
 impl FromStr for Encoding {
-    type Err = NrrdError;
+    type Err = ();
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         let idx = Encoding::idx(s).unwrap();
@@ -523,7 +619,7 @@ impl FromStr for Encoding {
             "gz" | "gzip" => rawgz,
             "bz2" | "bzip2" =>  rawbz2,
             "hex" => hex,
-            _=> Err(NrrdError::UnknownEncoding)?
+            _=> panic!("unknown encoding {}",s)
         };
         Ok(e)
     }
@@ -723,10 +819,42 @@ impl Display for OldMax {
  ********** DATAFILE *********
  ****************************/
 
+#[derive(Debug,Clone)]
 pub enum DataFile {
     SingleFile{filename: PathBuf},
     FileFormat{fmt_string: String, min:i32, max:i32, step:i32, sub_dim: Option<usize>},
-    List{sub_dim: Option<usize>},
+    List{sub_dim: Option<usize>, file_paths: Vec<PathBuf>},
+}
+
+impl DataFile {
+
+    pub fn paths(&self) -> Vec<PathBuf> {
+
+        match &self {
+            DataFile::SingleFile { filename } => vec![filename.clone()],
+            DataFile::FileFormat { fmt_string, min, max, step, sub_dim } => {
+                let mut paths = vec![];
+                if *step > 0 {
+                    for i in (min.abs()..=max.abs()).step_by(*step as usize) {
+                        paths.push(
+                            PathBuf::from(sprintf!(fmt_string, i).unwrap())
+                        )
+                    }
+                }
+                if *step < 0 {
+                    for i in (max.abs()..=min.abs()).rev().step_by(step.abs() as usize) {
+                        paths.push(
+                            PathBuf::from(sprintf!(fmt_string, i).unwrap())
+                        )
+                    }
+                }
+                paths
+            }
+            DataFile::List { file_paths,.. } => file_paths.clone(),
+        }
+
+    }
+
 }
 
 impl HeaderDef for DataFile {
@@ -742,7 +870,7 @@ impl FromStr for DataFile {
         let idx = DataFile::idx(s).unwrap();
         let s = s[idx..].trim();
 
-        let re = Regex::new(r#"(?:(\S+))\s+(-?\d+)\s+(-?\d+)\s+(-?\d+)(?:\s+(-?\d+))?"#)
+        let re = Regex::new(r"(?:(\S+))\s+(-?\d+)\s+(-?\d+)\s+(-?\d+)(?:\s+(-?\d+))?")
             .expect("invalid regex");
 
         if let Some(capture) = re.captures(s) {
@@ -754,10 +882,10 @@ impl FromStr for DataFile {
             return Ok(DataFile::FileFormat { fmt_string, min, max, step, sub_dim })
         }
 
-        let re = Regex::new(r"LIST (\d)").expect("invalid regex");
+        let re = Regex::new(r"LIST ?(\d)?").expect("invalid regex");
         if let Some(cap) = re.captures(s) {
             let sub_dim = cap.get(1).map(|s| s.as_str().parse::<usize>().unwrap());
-            return Ok(DataFile::List{sub_dim})
+            return Ok(DataFile::List{sub_dim, file_paths: vec![]}) // we don't know the files yet
         }
         Ok(DataFile::SingleFile{filename: PathBuf::from(s)})
 
@@ -775,11 +903,22 @@ impl Display for DataFile {
                     write!(f,"{}{fmt_string} {min} {max} {step}",Self::patterns()[0])
                 }
             }
-            DataFile::List{sub_dim} => {
+            DataFile::List{sub_dim, file_paths: filepaths } => {
+                let files = filepaths.iter().map(|p| p.display().to_string()).collect::<Vec<String>>();
                 if let Some(sub_dim) = sub_dim {
-                    write!(f,"{}LIST {sub_dim}",Self::patterns()[0])
+                    if !files.is_empty() {
+                        writeln!(f,"{}LIST {sub_dim}",Self::patterns()[0])?;
+                        write!(f,"{}",files.join("\n"))
+                    }else {
+                        write!(f,"{}LIST {sub_dim}",Self::patterns()[0])
+                    }
                 }else {
-                    write!(f,"{}LIST",Self::patterns()[0])
+                    if !files.is_empty() {
+                        writeln!(f,"{}LIST",Self::patterns()[0])?;
+                        write!(f,"{}",files.join("\n"))
+                    }else {
+                        write!(f,"{}LIST",Self::patterns()[0])
+                    }
                 }
             }
         }
@@ -790,8 +929,15 @@ impl Display for DataFile {
  ********** LINE SKIP ********
  ****************************/
 
+#[derive(Debug,Clone)]
 pub struct LineSkip {
     skip: usize,
+}
+
+impl LineSkip {
+    pub fn to_skip(&self) -> usize {
+        self.skip
+    }
 }
 
 impl HeaderDef for LineSkip {
@@ -826,6 +972,21 @@ pub enum ByteSkip {
     rev,
 }
 
+impl ByteSkip {
+    pub fn to_skip(&self) -> usize {
+        match self {
+            ByteSkip::skip(skip) => *skip,
+            ByteSkip::rev => 0,
+        }
+    }
+    pub fn read_tail(&self) -> bool {
+        match self {
+            Self::skip(_) => false,
+            Self::rev => true,
+        }
+    }
+}
+
 impl HeaderDef for ByteSkip {
     fn patterns<'a>() -> &'a [&'a str] {
         &["byte skip: ", "byteskip: "]
@@ -858,6 +1019,7 @@ impl Display for ByteSkip {
  ******** SAMPLE UNITS ********
  ****************************/
 
+#[derive(Debug,Clone)]
 pub struct SampleUnits {
     units: String,
 }
@@ -889,6 +1051,12 @@ impl Display for SampleUnits {
 #[derive(Debug,PartialEq,Eq,Clone)]
 pub struct Sizes {
     sizes: Vec<usize>
+}
+
+impl Sizes {
+    pub fn n_elements(&self) -> usize {
+        self.sizes.iter().product()
+    }
 }
 
 impl HeaderDef for Sizes {
@@ -966,31 +1134,31 @@ impl Display for Spacings {
  ****************************/
 
 #[derive(Debug,PartialEq,Clone)]
-pub struct Thickness {
+pub struct Thicknesses {
     thicknesses: Vec<f64>
 }
 
-impl HeaderDef for Thickness {
+impl HeaderDef for Thicknesses {
     fn patterns<'a>() -> &'a [&'a str] {
         &["thicknesses: "]
     }
 }
 
-impl FromStr for Thickness {
+impl FromStr for Thicknesses {
     type Err = ();
     fn from_str(s: &str) -> Result<Self, Self::Err> {
-        let idx = Thickness::idx(s).unwrap();
+        let idx = Thicknesses::idx(s).unwrap();
         let s = s[idx..].trim();
         let mut thicknesses = vec![];
         for thickness_str in s.split_ascii_whitespace() {
             let thickness = thickness_str.parse::<f64>().unwrap();
             thicknesses.push(thickness);
         }
-        Ok(Thickness{thicknesses})
+        Ok(Thicknesses {thicknesses})
     }
 }
 
-impl Display for Thickness {
+impl Display for Thicknesses {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         write!(f,"{}{}",
                Self::patterns()[0],
@@ -1084,12 +1252,14 @@ impl Display for AxisMaxs {
  *********** CENTERING *******
  ****************************/
 
+#[derive(Debug,Clone)]
 pub enum Centering {
     Cell,
     Node,
     None,
 }
 
+#[derive(Debug,Clone)]
 pub struct Centerings {
     centerings: Vec<Centering>
 }
@@ -1141,6 +1311,7 @@ impl Display for Centerings {
  ********** LABELS ***********
  ****************************/
 
+#[derive(Debug,Clone)]
 pub struct Labels {
     labels: Vec<String>
 }
@@ -1177,6 +1348,7 @@ impl Display for Labels {
  *********** UNITS ***********
  ****************************/
 
+#[derive(Debug,Clone)]
 pub struct Units {
     units: Vec<String>
 }
@@ -1190,7 +1362,7 @@ impl HeaderDef for Units {
 impl FromStr for Units {
     type Err = ();
     fn from_str(s: &str) -> Result<Self, Self::Err> {
-        let idx = Labels::idx(s).unwrap();
+        let idx = Units::idx(s).unwrap();
         let s = s[idx..].trim();
         let re = Regex::new(r#""([^"]+)""#).unwrap();
         let units = re.find_iter(s)
@@ -1213,6 +1385,7 @@ impl Display for Units {
  *********** KINDS ***********
  ****************************/
 
+#[derive(Debug,Clone)]
 pub struct Kinds {
     kinds: Vec<Kind>
 }
