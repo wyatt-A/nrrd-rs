@@ -1,6 +1,7 @@
 use std::fmt::{write, Display, Formatter};
 use std::path::{Path, PathBuf};
 use std::str::FromStr;
+use bytemuck::Pod;
 use regex::{Regex, RegexSet, SubCaptureMatches};
 use sprintf::sprintf;
 
@@ -480,7 +481,71 @@ pub enum DType {
     uint64,
     f32,
     f64,
-    Block,
+    block,
+}
+
+pub trait NRRDType: Pod {
+    fn dtype() -> DType;
+}
+
+impl NRRDType for i8 {
+    fn dtype() -> DType {
+        DType::int8
+    }
+}
+
+impl NRRDType for u8 {
+    fn dtype() -> DType {
+        DType::uint8
+    }
+}
+
+impl NRRDType for i16 {
+    fn dtype() -> DType {
+        DType::int16
+    }
+}
+
+impl NRRDType for u16 {
+    fn dtype() -> DType {
+        DType::uint16
+    }
+}
+
+impl NRRDType for i32 {
+    fn dtype() -> DType {
+        DType::int32
+    }
+}
+
+impl NRRDType for u32 {
+    fn dtype() -> DType {
+        DType::uint32
+    }
+}
+
+impl NRRDType for i64 {
+    fn dtype() -> DType {
+        DType::int64
+    }
+}
+
+impl NRRDType for u64 {
+    fn dtype() -> DType {
+        DType::uint64
+    }
+}
+
+impl NRRDType for f32 {
+    fn dtype() -> DType {
+        DType::f32
+    }
+}
+
+impl NRRDType for f64 {
+    fn dtype() -> DType {
+        DType::f64
+    }
 }
 
 impl HeaderDef for DType {
@@ -502,7 +567,7 @@ impl DType {
             DType::uint64 => size_of::<u64>(),
             DType::f32 => size_of::<f32>(),
             DType::f64 => size_of::<f64>(),
-            DType::Block => 1, // placeholder for blocksize
+            DType::block => 1, // placeholder for blocksize
         }
     }
 }
@@ -523,7 +588,7 @@ impl FromStr for DType {
             "ulonglong" | "unsigned long long" | "unsigned long long int" | "uint64" | "uint64_t" => uint64,
             "float" => f32,
             "double" => f64,
-            "block" => Block,
+            "block" => block,
             _=> panic!("unknown data type {}",s)
         };
         Ok(t)
@@ -543,7 +608,7 @@ impl Display for DType {
             DType::uint64 => "uint64",
             DType::f32 => "float",
             DType::f64 => "double",
-            DType::Block => "block",
+            DType::block => "block",
         };
         write!(f, "{}{s}",Self::patterns()[0])
     }

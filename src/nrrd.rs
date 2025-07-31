@@ -1,17 +1,25 @@
+use std::any::{Any, TypeId};
 use std::collections::{HashMap, VecDeque};
 use std::fmt::{Debug, Display, Formatter};
 use std::fs::File;
+use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::str::FromStr;
-use byteorder::{BigEndian, ByteOrder, LittleEndian};
+use byteorder::{BigEndian, ByteOrder, LittleEndian, NativeEndian};
 use num_traits::{Euclid, FromPrimitive, ToPrimitive, Zero};
-use crate::header_defs::{AxisMaxs, AxisMins, BlockSize, ByteSkip, Centerings, Comment, Content, DType, DataFile, Dimension, Encoding, Endian, HeaderDef, Kinds, Labels, LineSkip, Magic, Max, Min, OldMax, OldMin, SampleUnits, Sizes, Space, SpaceDimension, SpaceDirections, SpaceOrigin, SpaceUnits, Spacings, Thicknesses, Units, Value};
+use crate::header_defs::{AxisMaxs, AxisMins, BlockSize, ByteSkip, Centerings, Comment, Content, DType, DataFile, Dimension, Encoding, Endian, HeaderDef, Kinds, Labels, LineSkip, Magic, Max, Min, NRRDType, OldMax, OldMin, SampleUnits, Sizes, Space, SpaceDimension, SpaceDirections, SpaceOrigin, SpaceUnits, Spacings, Thicknesses, Units, Value};
 use crate::io;
+
+#[cfg(target_endian = "little")]
+const NATIVE_LITTLE: bool = true;
+
+#[cfg(target_endian = "big")]
+const NATIVE_LITTLE: bool = false;
 
 #[cfg(test)]
 mod tests {
     use std::fs::File;
-    use crate::header::Header;
+    use crate::nrrd::NRRD;
     use crate::io;
 
     #[test]
@@ -21,7 +29,7 @@ mod tests {
         let (header_bytes,offset) = io::read_until_blank(&mut f).expect("failed to read header");
         let header_str = String::from_utf8(header_bytes).expect("failed to convert bytes to string");
         let mut header_lines = header_str.lines().collect::<Vec<&str>>();
-        let h = Header::full_from_lines(&mut header_lines);
+        let h = NRRD::full_from_lines(&mut header_lines);
         // this means we accounted for every line in the string
         assert!(header_lines.is_empty());
     }
@@ -34,7 +42,7 @@ mod tests {
         let (header_bytes,offset) = io::read_until_blank(&mut f).expect("failed to read header");
         let header_str = String::from_utf8(header_bytes).expect("failed to convert bytes to string");
         let mut header_lines = header_str.lines().collect::<Vec<&str>>();
-        let h = Header::full_from_lines(&mut header_lines);
+        let h = NRRD::full_from_lines(&mut header_lines);
 
         assert!(header_lines.is_empty());
 
@@ -46,98 +54,126 @@ mod tests {
 
 }
 
+#[derive(Debug,Clone)]
+pub struct NRRD {
 
-fn read_header_def<T:HeaderDef + FromStr>(header_lines: &mut Vec<&str>) -> Option<T> {
-    let found = header_lines.iter().enumerate().find_map(|(i,x)|{
-        if T::matches(x) {
-            match T::from_str(x) {
-                Ok(f) => return Some((i,f)),
-                Err(_) => panic!("failed to parse header line {x}")
-            }
-        }else {
-            None
-        }
-    });
-    if let Some((idx,field)) = found {
-        header_lines.remove(idx);
-        return Some(field);
-    }
-    None
+    /* BASIC FIELDS */
+    pub magic: Magic,
+    pub dimension: Dimension,
+    pub dtype: DType,
+    pub block_size: Option<BlockSize>,
+    pub encoding: Encoding,
+    pub endian: Endian,
+    pub content: Option<Content>,
+    pub min: Option<Min>,
+    pub max: Option<Max>,
+    pub old_min: Option<OldMin>,
+    pub old_max: Option<OldMax>,
+    pub data_file: Option<DataFile>,
+    pub line_skip: Option<LineSkip>,
+    pub byte_skip: Option<ByteSkip>,
+    pub sample_units: Option<SampleUnits>,
+
+    /* PER-AXIS FIELDS */
+    pub sizes: Sizes,
+    pub spacings: Option<Spacings>,
+    pub thicknesses: Option<Thicknesses>,
+    pub axis_mins: Option<AxisMins>,
+    pub axis_maxs: Option<AxisMaxs>,
+    pub centerings: Option<Centerings>,
+    pub labels: Option<Labels>,
+    pub units: Option<Units>,
+    pub kinds: Option<Kinds>,
+
+    /* SPACE and ORIENTATION */
+    pub space : Option<Space>,
+    pub space_dimension: Option<SpaceDimension>,
+    pub space_units: Option<SpaceUnits>,
+    pub space_origin: Option<SpaceOrigin>,
+    pub space_directions: Option<SpaceDirections>,
+
+    /* EXTRA KEY-VALUE DATA */
+    pub key_vals: HashMap<String, Value>,
+
+    /* COMMENTS */
+    pub comments:Vec<String>,
 }
 
-fn read_data_file(header_lines: &mut Vec<&str>) -> Option<DataFile> {
+impl NRRD {
 
+    pub fn write<T:NRRDType>(&self, filepath:impl AsRef<Path>, payload:Vec<T>, attached:bool, encoding:Encoding) {
 
-    let mut found = header_lines.iter().enumerate().find_map(|(i,x)|{
-        if DataFile::matches(x) {
-            match DataFile::from_str(x) {
-                Ok(f) => return Some((i,f)),
-                Err(_) => panic!("failed to parse header line {x}")
-            }
+        let mut h = self.clone();
+
+        let bytes:&[u8] = bytemuck::cast_slice(&payload);
+
+        // assert that the number of bytes make sense
+        let expected_bytes = self.expected_bytes();
+        assert_eq!(bytes.len(),expected_bytes);
+
+        h.dtype = T::dtype();
+
+        // we write in native endianness to avoid overhead of byte swapping
+        h.endian = if NATIVE_LITTLE {
+            Endian::Little
         }else {
-            None
-        }
-    });
+            Endian::Big
+        };
 
-    // insert remaining header lines if the data file spec is a list
-    if let Some((idx,df)) = found.as_mut() {
-        if let DataFile::List {sub_dim, file_paths: filepaths } = df {
-            // the remaining lines must be the files listed out
-            //let mut c = 0;
-            header_lines[(*idx+1)..].iter().for_each(|line|{
-                filepaths.push(PathBuf::from(line));
-                //c += 1;
+        // set the encoding
+        h.encoding = encoding;
+
+        // ensure line skip and byte skip are null
+        h.byte_skip = None;
+        h.line_skip = None;
+
+        if attached {
+
+            h.data_file = None;
+            let data_p = filepath.as_ref().with_extension("nhdr");
+            let mut f = File::create(data_p).unwrap();
+            f.write_all(h.to_string().as_bytes()).unwrap();
+            match encoding {
+                Encoding::raw => io::write_raw(&mut f, bytes),
+                Encoding::rawgz => io::write_gzip(&mut f, bytes),
+                Encoding::rawbz2 => io::write_bzip2(&mut f, bytes),
+                _=> panic!("encoding {} not yet supported",h.encoding)
+            };
+
+        }else {
+
+            let ext = match encoding {
+                Encoding::raw => "raw",
+                Encoding::rawgz => "raw.gz",
+                Encoding::rawbz2 => "raw.bz2",
+                _=> panic!("encoding {} not yet supported",h.encoding)
+            };
+
+            let df = Path::new(
+                filepath.as_ref().file_name().unwrap().to_str().unwrap()
+            ).with_extension(ext);
+            h.data_file = Some(DataFile::SingleFile {
+                filename: df,
             });
+            let data_p = filepath.as_ref().with_extension(ext);
+            let header_p = filepath.as_ref().with_extension("nhdr");
 
-            // pop the data_file line and all files listed
-            for _ in 0..header_lines[*idx..].len() {
-                header_lines.pop();
-            }
+            let mut f = File::create(data_p).unwrap();
+            match encoding {
+                Encoding::raw => io::write_raw(&mut f, bytes),
+                Encoding::rawgz => io::write_gzip(&mut f, bytes),
+                Encoding::rawbz2 => io::write_bzip2(&mut f, bytes),
+                _=> panic!("encoding {} not yet supported",h.encoding)
+            };
+            let mut f = File::create(header_p).unwrap();
+            f.write_all(h.to_string().as_bytes()).unwrap();
+        };
 
-        }else {
-            header_lines.remove(*idx);
-        }
     }
-    found.map(|(_,df)| df)
-}
 
-fn read_key_values(header_lines: &mut Vec<&str>) -> HashMap<String, Value> {
-    let mut keyvals = HashMap::<String,Value>::new();
-    header_lines.retain(|x| {
-        if Value::matches_key_value(x) {
-            let key =Value::key(x);
-            let value = Value::from_str(x).expect("failed to parse value");
-            keyvals.insert(key, value);
-            false
-        }else {
-            true
-        }
-    });
-    keyvals
-}
+    pub fn read_to<T:FromPrimitive + Zero>(filepath:impl AsRef<Path>) -> (Vec<T>, NRRD) {
 
-fn read_comments(header_lines: &mut Vec<&str>) -> Vec<String> {
-    let mut comments = Vec::new();
-    header_lines.retain(|x| {
-        if Comment::matches(x) {
-            // from_str will error is comment is empty, so we ignore the line
-            if let Ok(comment) = Comment::from_str(x) {
-                comments.push(comment.to_string())
-            }
-            false
-        }else {
-            true
-        }
-    });
-    comments
-}
-
-
-impl Header {
-
-    pub fn read_to<T:FromPrimitive + Zero>(filepath:impl AsRef<Path>) -> (Vec<T>, Self) {
-
-        let (bytes,h) = Self::read_payload(filepath);
+        let (bytes,h) = NRRD::read_payload(filepath);
 
         let n = h.sizes.n_elements();
 
@@ -208,11 +244,15 @@ impl Header {
                 }
                 buf.into_iter().map(|x| T::from_f64(x).unwrap()).collect()
             }
-            DType::Block => {
+            DType::block => {
                 panic!("cannot read block data into primitive type")
             }
         };
         (x,h)
+    }
+
+    fn expected_bytes(&self) -> usize {
+        self.sizes.n_elements() * self.element_size()
     }
 
     pub fn read_payload(filepath:impl AsRef<Path>) -> (Vec<u8>, Self) {
@@ -221,9 +261,9 @@ impl Header {
         let (header_bytes,_offset) = io::read_until_blank(&mut f).expect("failed to read header");
         let header_str = String::from_utf8(header_bytes).expect("failed to convert bytes to string");
         let mut header_lines = header_str.lines().collect::<Vec<&str>>();
-        let h = Header::full_from_lines(&mut header_lines);
+        let h = NRRD::full_from_lines(&mut header_lines);
 
-        let n_expected_bytes = h.sizes.n_elements() * h.element_size();
+        let n_expected_bytes = h.expected_bytes();
         let mut bytes = vec![0u8;n_expected_bytes];
         let line_skip = h.line_skip.as_ref().map(|ls| ls.to_skip()).unwrap_or(0);
         let (byte_skip,read_tail) = h.byte_skip.as_ref().map(|bs| (bs.to_skip(),bs.read_tail())).unwrap_or((0,false));
@@ -295,7 +335,7 @@ impl Header {
 
     /// returns the size of each element as determined by 'type' and 'block size' if necessary
     pub fn element_size(&self) -> usize {
-        if let DType::Block = self.dtype {
+        if let DType::block = self.dtype {
             let bs = self.block_size.as_ref().expect("block size must be defined for data type of 'block'");
             bs.size()
         }else {
@@ -303,7 +343,7 @@ impl Header {
         }
     }
 
-    pub fn full_from_lines(lines:&mut Vec<&str>) -> Header {
+    pub fn full_from_lines(lines:&mut Vec<&str>) -> NRRD {
 
         let mut h = Self::minimal_from_lines(lines);
 
@@ -343,7 +383,7 @@ impl Header {
     }
 
     /// construct a minimal NHDR from a string
-    pub fn minimal_from_lines(lines:&mut Vec<&str>) -> Header {
+    pub fn minimal_from_lines(lines:&mut Vec<&str>) -> NRRD {
 
         assert!(!lines.is_empty(),"lines must not be empty");
 
@@ -351,7 +391,7 @@ impl Header {
         let dimension:Dimension = read_header_def(lines).expect("failed to get dimension field");
         let dtype:DType = read_header_def(lines).expect("failed to get dtype field");
 
-        let block_size:Option<BlockSize> = if dtype == DType::Block {
+        let block_size:Option<BlockSize> = if dtype == DType::block {
             Some(read_header_def(lines).expect("failed to get block size field"))
         }else {
             None
@@ -362,7 +402,7 @@ impl Header {
         let sizes:Sizes = read_header_def(lines).expect("failed to get sizes field");
 
 
-        Header {
+        NRRD {
             magic,
             dimension,
             dtype,
@@ -403,7 +443,7 @@ impl Header {
     }
 }
 
-impl Display for Header {
+impl Display for NRRD {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
 
 
@@ -524,48 +564,87 @@ impl Display for Header {
 }
 
 
+fn read_header_def<T:HeaderDef + FromStr>(header_lines: &mut Vec<&str>) -> Option<T> {
+    let found = header_lines.iter().enumerate().find_map(|(i,x)|{
+        if T::matches(x) {
+            match T::from_str(x) {
+                Ok(f) => return Some((i,f)),
+                Err(_) => panic!("failed to parse header line {x}")
+            }
+        }else {
+            None
+        }
+    });
+    if let Some((idx,field)) = found {
+        header_lines.remove(idx);
+        return Some(field);
+    }
+    None
+}
 
-#[derive(Debug,Clone)]
-pub struct Header {
+fn read_data_file(header_lines: &mut Vec<&str>) -> Option<DataFile> {
 
-    /* BASIC FIELDS */
-    magic: Magic,
-    dimension: Dimension,
-    dtype: DType,
-    block_size: Option<BlockSize>,
-    pub(crate) encoding: Encoding,
-    endian: Endian,
-    content: Option<Content>,
-    min: Option<Min>,
-    max: Option<Max>,
-    old_min: Option<OldMin>,
-    old_max: Option<OldMax>,
-    pub(crate) data_file: Option<DataFile>,
-    line_skip: Option<LineSkip>,
-    byte_skip: Option<ByteSkip>,
-    sample_units: Option<SampleUnits>,
 
-    /* PER-AXIS FIELDS */
-    sizes: Sizes,
-    spacings: Option<Spacings>,
-    thicknesses: Option<Thicknesses>,
-    axis_mins: Option<AxisMins>,
-    axis_maxs: Option<AxisMaxs>,
-    centerings: Option<Centerings>,
-    labels: Option<Labels>,
-    units: Option<Units>,
-    kinds: Option<Kinds>,
+    let mut found = header_lines.iter().enumerate().find_map(|(i,x)|{
+        if DataFile::matches(x) {
+            match DataFile::from_str(x) {
+                Ok(f) => return Some((i,f)),
+                Err(_) => panic!("failed to parse header line {x}")
+            }
+        }else {
+            None
+        }
+    });
 
-    /* SPACE and ORIENTATION */
-    space : Option<Space>,
-    space_dimension: Option<SpaceDimension>,
-    space_units: Option<SpaceUnits>,
-    space_origin: Option<SpaceOrigin>,
-    space_directions: Option<SpaceDirections>,
+    // insert remaining header lines if the data file spec is a list
+    if let Some((idx,df)) = found.as_mut() {
+        if let DataFile::List {sub_dim, file_paths: filepaths } = df {
+            // the remaining lines must be the files listed out
+            //let mut c = 0;
+            header_lines[(*idx+1)..].iter().for_each(|line|{
+                filepaths.push(PathBuf::from(line));
+                //c += 1;
+            });
 
-    /* EXTRA KEY-VALUE DATA */
-    key_vals: HashMap<String, Value>,
+            // pop the data_file line and all files listed
+            for _ in 0..header_lines[*idx..].len() {
+                header_lines.pop();
+            }
 
-    /* COMMENTS */
-    comments:Vec<String>,
+        }else {
+            header_lines.remove(*idx);
+        }
+    }
+    found.map(|(_,df)| df)
+}
+
+fn read_key_values(header_lines: &mut Vec<&str>) -> HashMap<String, Value> {
+    let mut keyvals = HashMap::<String,Value>::new();
+    header_lines.retain(|x| {
+        if Value::matches_key_value(x) {
+            let key =Value::key(x);
+            let value = Value::from_str(x).expect("failed to parse value");
+            keyvals.insert(key, value);
+            false
+        }else {
+            true
+        }
+    });
+    keyvals
+}
+
+fn read_comments(header_lines: &mut Vec<&str>) -> Vec<String> {
+    let mut comments = Vec::new();
+    header_lines.retain(|x| {
+        if Comment::matches(x) {
+            // from_str will error is comment is empty, so we ignore the line
+            if let Ok(comment) = Comment::from_str(x) {
+                comments.push(comment.to_string())
+            }
+            false
+        }else {
+            true
+        }
+    });
+    comments
 }
