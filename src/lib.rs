@@ -97,7 +97,7 @@ mod tests {
     }
 }
 
-pub fn read_nrrd_to<T:FromPrimitive>(filepath:impl AsRef<Path>) -> (Vec<T>, NRRD) {
+pub fn read_nrrd_to<T:FromPrimitive + NRRDType>(filepath:impl AsRef<Path>) -> (Vec<T>, NRRD) {
 
     // read bytes and header from nrrd
     let (bytes,h) = read_payload(filepath);
