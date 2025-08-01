@@ -8,7 +8,7 @@ use std::str::FromStr;
 use byteorder::{BigEndian, ByteOrder, LittleEndian};
 use num_traits::{Euclid, FromPrimitive, ToPrimitive, Zero};
 
-mod header_defs;
+pub mod header_defs;
 mod io;
 
 use header_defs::{AxisMaxs, AxisMins, BlockSize, ByteSkip, Centerings, Comment, Content, DType, DataFile, Dimension, Encoding, Endian, HeaderDef, Kinds, Labels, LineSkip, Magic, Max, Min, NRRDType, OldMax, OldMin, SampleUnits, Sizes, Space, SpaceDimension, SpaceDirections, SpaceOrigin, SpaceUnits, Spacings, Thicknesses, Units, Value};
