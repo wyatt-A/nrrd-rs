@@ -179,7 +179,7 @@ pub fn read_nrrd_to<T:FromPrimitive>(filepath:impl AsRef<Path>) -> (Vec<T>, NRRD
     (x,h)
 }
 
-pub fn write_nrrd<T:NRRDType>(filepath:impl AsRef<Path>, ref_header:&NRRD, payload:&[T], attached:bool, encoding:Encoding) {
+pub fn write_nrrd<T:NRRDType>(filepath:impl AsRef<Path>, ref_header:&NRRD, data:&[T], attached:bool, encoding:Encoding) {
 
     let mut h = ref_header.clone();
 
@@ -187,7 +187,7 @@ pub fn write_nrrd<T:NRRDType>(filepath:impl AsRef<Path>, ref_header:&NRRD, paylo
     h.endian = Endian::native();
 
     // this cast is valid only for native endianness
-    let bytes:&[u8] = bytemuck::cast_slice(payload);
+    let bytes:&[u8] = bytemuck::cast_slice(data);
 
     // assert that the number of bytes is as expected
     let expected_bytes = h.expected_bytes();
