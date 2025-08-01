@@ -6,6 +6,17 @@ use bzip2::read::BzDecoder;
 use bzip2::write::BzEncoder;
 use flate2::write::{GzDecoder, GzEncoder};
 
+#[cfg(test)]
+mod tests {
+
+    #[test]
+    fn test() {
+        println!("gzip test");
+    }
+
+}
+
+
 pub fn read_until_blank(file: &mut File) -> io::Result<(Vec<u8>, Option<u64>)> {
     let start_pos = file.stream_position()?;          // where we began
     let mut rdr  = BufReader::new(file);
