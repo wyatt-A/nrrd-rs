@@ -371,9 +371,11 @@ pub struct NRRD {
 }
 
 
-
-
 impl NRRD {
+
+    pub fn shape(&self) -> &[usize] {
+        self.sizes.
+    }
 
     pub fn new_from_dims<T:NRRDType>(dims:&[usize]) -> NRRD {
 

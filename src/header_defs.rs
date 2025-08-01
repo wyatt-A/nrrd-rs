@@ -1164,6 +1164,11 @@ impl Sizes {
             sizes: sizes.to_vec()
         }
     }
+
+    pub fn shape(&self) -> &[usize] {
+        &self.sizes
+    }
+
 }
 
 impl Sizes {
