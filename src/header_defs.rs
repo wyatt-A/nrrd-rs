@@ -739,6 +739,13 @@ pub enum Endian {
     Little,
 }
 
+impl Endian {
+    /// returns the native endianness of this device
+    pub fn native() -> Endian {
+        native_endian()
+    }
+}
+
 impl Default for Endian {
     fn default() -> Self {
         native_endian()

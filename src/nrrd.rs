@@ -1,5 +1,5 @@
-use std::any::{Any, TypeId};
-use std::collections::{HashMap, VecDeque};
+use std::any::Any;
+use std::collections::HashMap;
 use std::fmt::{Debug, Display, Formatter};
 use std::fs::File;
 use std::io::Write;
@@ -10,10 +10,9 @@ use num_traits::{Euclid, FromPrimitive, ToPrimitive, Zero};
 use crate::header_defs::{AxisMaxs, AxisMins, BlockSize, ByteSkip, Centerings, Comment, Content, DType, DataFile, Dimension, Encoding, Endian, HeaderDef, Kinds, Labels, LineSkip, Magic, Max, Min, NRRDType, OldMax, OldMin, SampleUnits, Sizes, Space, SpaceDimension, SpaceDirections, SpaceOrigin, SpaceUnits, Spacings, Thicknesses, Units, Value};
 use crate::io;
 
-
-
 #[cfg(test)]
 mod tests {
+    use std::fs;
     use std::fs::File;
     use crate::header_defs::Encoding;
     use crate::nrrd::{read_nrrd_to, write_nrrd, NRRD};
@@ -51,8 +50,28 @@ mod tests {
     #[test]
     fn literacy_attached_minimal() {
 
+        let attached = true;
+        let dims = [2,3,4];
+        let n = dims.iter().product::<usize>();
+        let data:Vec<_> = (0..n).map(|x| x as f64).collect();
+        let nrrd = NRRD::new_from_dims::<f64>(&dims);
+
+        let encodings = [Encoding::raw, Encoding::rawgz, Encoding::rawbz2];
+
+        for encoding in encodings {
+            write_nrrd("test_out", &nrrd, &data, attached, encoding);
+            let (data_,nrrd) = read_nrrd_to::<i8>("test_out.nrrd");
+            let data_ = data_.into_iter().map(|x| x as f64).collect::<Vec<f64>>();
+            assert_eq!(data_,data);
+            fs::remove_file("test_out.nrrd").unwrap();
+        }
+    }
+
+    #[test]
+    fn literacy_detached_minimal() {
+
         let attached = false;
-        let dims = [2,1,1];
+        let dims = [2,3,4];
         let n = dims.iter().product::<usize>();
         let data:Vec<_> = (0..n).map(|x| x as f64).collect();
         let nrrd = NRRD::new_from_dims::<f64>(&dims);
@@ -64,8 +83,15 @@ mod tests {
             let (data_,nrrd) = read_nrrd_to::<i8>("test_out.nhdr");
             let data_ = data_.into_iter().map(|x| x as f64).collect::<Vec<f64>>();
             assert_eq!(data_,data);
-        }
 
+            fs::remove_file("test_out.nhdr").unwrap();
+            match encoding {
+                Encoding::raw => fs::remove_file("test_out.raw").unwrap(),
+                Encoding::rawgz => fs::remove_file("test_out.raw.gz").unwrap(),
+                Encoding::rawbz2 => fs::remove_file("test_out.raw.bz2").unwrap(),
+                _=> {}
+            }
+        }
     }
 
 
