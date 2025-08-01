@@ -97,7 +97,7 @@ mod tests {
     }
 }
 
-pub fn read_nrrd_to<T:FromPrimitive + NRRDType>(filepath:impl AsRef<Path>) -> (Vec<T>, NRRD) {
+pub fn read_nrrd_to<T:NRRDType + FromPrimitive>(filepath:impl AsRef<Path>) -> (Vec<T>, NRRD) {
 
     // read bytes and header from nrrd
     let (bytes,h) = read_payload(filepath);
@@ -183,6 +183,9 @@ pub fn write_nrrd<T:NRRDType>(filepath:impl AsRef<Path>, ref_header:&NRRD, data:
 
     let mut h = ref_header.clone();
 
+    // insert the data type of the array
+    h.dtype = T::dtype();
+
     // we write in native endianness to avoid overhead of byte swapping
     h.endian = Endian::native();
 
@@ -192,9 +195,6 @@ pub fn write_nrrd<T:NRRDType>(filepath:impl AsRef<Path>, ref_header:&NRRD, data:
     // assert that the number of bytes is as expected
     let expected_bytes = h.expected_bytes();
     assert_eq!(bytes.len(),expected_bytes);
-
-    // insert the data type of the array
-    h.dtype = T::dtype();
 
     // set the encoding
     h.encoding = encoding;
