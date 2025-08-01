@@ -10,16 +10,13 @@ use num_traits::{Euclid, FromPrimitive, ToPrimitive, Zero};
 use crate::header_defs::{AxisMaxs, AxisMins, BlockSize, ByteSkip, Centerings, Comment, Content, DType, DataFile, Dimension, Encoding, Endian, HeaderDef, Kinds, Labels, LineSkip, Magic, Max, Min, NRRDType, OldMax, OldMin, SampleUnits, Sizes, Space, SpaceDimension, SpaceDirections, SpaceOrigin, SpaceUnits, Spacings, Thicknesses, Units, Value};
 use crate::io;
 
-#[cfg(target_endian = "little")]
-const NATIVE_LITTLE: bool = true;
 
-#[cfg(target_endian = "big")]
-const NATIVE_LITTLE: bool = false;
 
 #[cfg(test)]
 mod tests {
     use std::fs::File;
-    use crate::nrrd::NRRD;
+    use crate::header_defs::Encoding;
+    use crate::nrrd::{read_nrrd_to, write_nrrd, NRRD};
     use crate::io;
 
     #[test]
@@ -29,7 +26,7 @@ mod tests {
         let (header_bytes,offset) = io::read_until_blank(&mut f).expect("failed to read header");
         let header_str = String::from_utf8(header_bytes).expect("failed to convert bytes to string");
         let mut header_lines = header_str.lines().collect::<Vec<&str>>();
-        let h = NRRD::full_from_lines(&mut header_lines);
+        let h = NRRD::from_lines_full(&mut header_lines);
         // this means we accounted for every line in the string
         assert!(header_lines.is_empty());
     }
@@ -42,7 +39,7 @@ mod tests {
         let (header_bytes,offset) = io::read_until_blank(&mut f).expect("failed to read header");
         let header_str = String::from_utf8(header_bytes).expect("failed to convert bytes to string");
         let mut header_lines = header_str.lines().collect::<Vec<&str>>();
-        let h = NRRD::full_from_lines(&mut header_lines);
+        let h = NRRD::from_lines_full(&mut header_lines);
 
         assert!(header_lines.is_empty());
 
@@ -51,8 +48,251 @@ mod tests {
         println!("{:?}",paths);
     }
 
+    #[test]
+    fn literacy_attached_minimal() {
+
+        let attached = false;
+        let dims = [2,1,1];
+        let n = dims.iter().product::<usize>();
+        let data:Vec<_> = (0..n).map(|x| x as f64).collect();
+        let nrrd = NRRD::new_from_dims::<f64>(&dims);
+
+        let encodings = [Encoding::raw, Encoding::rawgz, Encoding::rawbz2];
+
+        for encoding in encodings {
+            write_nrrd("test_out", &nrrd, &data, attached, encoding);
+            let (data_,nrrd) = read_nrrd_to::<i8>("test_out.nhdr");
+            let data_ = data_.into_iter().map(|x| x as f64).collect::<Vec<f64>>();
+            assert_eq!(data_,data);
+        }
+
+    }
+
 
 }
+
+pub fn read_nrrd_to<T:FromPrimitive>(filepath:impl AsRef<Path>) -> (Vec<T>, NRRD) {
+
+    let (bytes,h) = read_payload(filepath);
+
+    let n = h.sizes.n_elements();
+
+    let x:Vec<T> = match h.dtype {
+        DType::int8 => bytes.into_iter().map(|byte| T::from_i8(byte as i8).unwrap()).collect(),
+        DType::uint8 => bytes.into_iter().map(|byte| T::from_u8(byte).unwrap()).collect(),
+        DType::int16 => {
+            let mut buf = vec![0i16;n];
+            match h.endian {
+                Endian::Big => BigEndian::read_i16_into(&bytes, &mut buf),
+                Endian::Little => LittleEndian::read_i16_into(&bytes, &mut buf),
+            }
+            buf.into_iter().map(|x| T::from_i16(x).unwrap()).collect()
+        }
+        DType::uint16 => {
+            let mut buf = vec![0u16;n];
+            match h.endian {
+                Endian::Big => BigEndian::read_u16_into(&bytes, &mut buf),
+                Endian::Little => LittleEndian::read_u16_into(&bytes, &mut buf),
+            }
+            buf.into_iter().map(|x| T::from_u16(x).unwrap()).collect()
+        }
+        DType::int32 => {
+            let mut buf = vec![0i32;n];
+            match h.endian {
+                Endian::Big => BigEndian::read_i32_into(&bytes, &mut buf),
+                Endian::Little => LittleEndian::read_i32_into(&bytes, &mut buf),
+            }
+            buf.into_iter().map(|x| T::from_i32(x).unwrap()).collect()
+        }
+        DType::uint32 => {
+            let mut buf = vec![0u32;n];
+            match h.endian {
+                Endian::Big => BigEndian::read_u32_into(&bytes, &mut buf),
+                Endian::Little => LittleEndian::read_u32_into(&bytes, &mut buf),
+            }
+            buf.into_iter().map(|x| T::from_u32(x).unwrap()).collect()
+        }
+        DType::int64 => {
+            let mut buf = vec![0i64;n];
+            match h.endian {
+                Endian::Big => BigEndian::read_i64_into(&bytes, &mut buf),
+                Endian::Little => LittleEndian::read_i64_into(&bytes, &mut buf),
+            }
+            buf.into_iter().map(|x| T::from_i64(x).unwrap()).collect()
+        }
+        DType::uint64 => {
+            let mut buf = vec![0u64;n];
+            match h.endian {
+                Endian::Big => BigEndian::read_u64_into(&bytes, &mut buf),
+                Endian::Little => LittleEndian::read_u64_into(&bytes, &mut buf),
+            }
+            buf.into_iter().map(|x| T::from_u64(x).unwrap()).collect()
+        }
+        DType::f32 => {
+            let mut buf = vec![0f32;n];
+            match h.endian {
+                Endian::Big => BigEndian::read_f32_into(&bytes, &mut buf),
+                Endian::Little => LittleEndian::read_f32_into(&bytes, &mut buf),
+            }
+            buf.into_iter().map(|x| T::from_f32(x).unwrap()).collect()
+        }
+        DType::f64 => {
+            let mut buf = vec![0f64;n];
+            match h.endian {
+                Endian::Big => BigEndian::read_f64_into(&bytes, &mut buf),
+                Endian::Little => LittleEndian::read_f64_into(&bytes, &mut buf),
+            }
+            buf.into_iter().map(|x| T::from_f64(x).unwrap()).collect()
+        }
+        DType::block => {
+            panic!("cannot read block data into primitive type")
+        }
+    };
+    (x,h)
+}
+
+pub fn write_nrrd<T:NRRDType>(filepath:impl AsRef<Path>, ref_header:&NRRD, payload:&[T], attached:bool, encoding:Encoding) {
+
+    let mut h = ref_header.clone();
+
+    let bytes:&[u8] = bytemuck::cast_slice(payload);
+
+    // assert that the number of bytes make sense
+    let expected_bytes = h.expected_bytes();
+    assert_eq!(bytes.len(),expected_bytes);
+
+    h.dtype = T::dtype();
+
+    // we write in native endianness to avoid overhead of byte swapping
+    h.endian = Endian::default();
+
+    // set the encoding
+    h.encoding = encoding;
+
+    // ensure line skip and byte skip are null
+    h.byte_skip = None;
+    h.line_skip = None;
+
+    if attached {
+
+        h.data_file = None;
+        let data_p = filepath.as_ref().with_extension("nrrd");
+        let mut f = File::create(data_p).unwrap();
+        f.write_all(h.to_string().as_bytes()).unwrap();
+        match encoding {
+            Encoding::raw => io::write_raw(&mut f, bytes),
+            Encoding::rawgz => io::write_gzip(&mut f, bytes),
+            Encoding::rawbz2 => io::write_bzip2(&mut f, bytes),
+            _=> panic!("encoding {} not yet supported",h.encoding)
+        };
+
+    }else {
+
+        let ext = match encoding {
+            Encoding::raw => "raw",
+            Encoding::rawgz => "raw.gz",
+            Encoding::rawbz2 => "raw.bz2",
+            _=> panic!("encoding {} not yet supported",h.encoding)
+        };
+
+        let df = Path::new(
+            filepath.as_ref().file_name().unwrap().to_str().unwrap()
+        ).with_extension(ext);
+        h.data_file = Some(DataFile::SingleFile {
+            filename: df,
+        });
+        let data_p = filepath.as_ref().with_extension(ext);
+        let header_p = filepath.as_ref().with_extension("nhdr");
+
+        let mut f = File::create(data_p).unwrap();
+        match encoding {
+            Encoding::raw => io::write_raw(&mut f, bytes),
+            Encoding::rawgz => io::write_gzip(&mut f, bytes),
+            Encoding::rawbz2 => io::write_bzip2(&mut f, bytes),
+            _=> panic!("encoding {} not yet supported",h.encoding)
+        };
+        let mut f = File::create(header_p).unwrap();
+        f.write_all(h.to_string().as_bytes()).unwrap();
+    };
+}
+
+pub fn read_payload(filepath:impl AsRef<Path>) -> (Vec<u8>, NRRD) {
+
+    let mut f = File::open(&filepath).unwrap();
+    let (header_bytes,_offset) = io::read_until_blank(&mut f).expect("failed to read header");
+    let header_str = String::from_utf8(header_bytes).expect("failed to convert bytes to string");
+    let mut header_lines = header_str.lines().collect::<Vec<&str>>();
+    let h = NRRD::from_lines_full(&mut header_lines);
+
+    let n_expected_bytes = h.expected_bytes();
+    let mut bytes = vec![0u8;n_expected_bytes];
+    let line_skip = h.line_skip.as_ref().map(|ls| ls.to_skip()).unwrap_or(0);
+    let (byte_skip,read_tail) = h.byte_skip.as_ref().map(|bs| (bs.to_skip(),bs.read_tail())).unwrap_or((0,false));
+
+    if let Some(datafile) = h.data_file.as_ref() {
+        // this means the header is detached
+
+        // resolve full paths if necessary
+        let resolved_paths = datafile.paths().into_iter().map(|p|{
+            if p.is_relative() {
+                filepath.as_ref().parent().unwrap().join(p)
+            }else {
+                p
+            }
+        }).collect::<Vec<PathBuf>>();
+
+        // check that all exist before attempting to read
+        resolved_paths.iter().for_each(|file| {
+            if !file.exists() {
+                panic!("{} does not exist", file.display());
+            }
+        });
+
+        let n_files = resolved_paths.len();
+        let (bytes_per_file,rem) = n_expected_bytes.div_rem_euclid(&n_files);
+        assert_eq!(rem,0,"number of files ({n_files}) doesn't divide total number of bytes evenly ({n_expected_bytes})");
+
+        bytes.chunks_exact_mut(bytes_per_file).zip(&resolved_paths).for_each(|(chunk,file)|{
+            let mut f = File::open(&file).unwrap();
+            io::skip_lines(&mut f, line_skip);
+            match h.encoding {
+                Encoding::raw => io::read_raw(&mut f, None, chunk, byte_skip),
+                Encoding::rawgz => io::read_gzip(&mut f, None, chunk, byte_skip),
+                Encoding::rawbz2 => io::read_bzip2(&mut f, None, chunk, byte_skip),
+                _=> panic!("unsupported encoding ({}) for now", h.encoding)
+            };
+        });
+
+        (bytes,h)
+
+    } else {
+        // this means the header is attached
+        io::skip_lines(&mut f,line_skip);
+
+        match h.encoding {
+            Encoding::raw => {
+                if read_tail {
+                    io::read_tail(&mut f, &mut bytes);
+                }else {
+                    io::read_raw(&mut f, None, &mut bytes, byte_skip);
+                }
+                (bytes,h)
+            }
+            Encoding::rawgz => {
+                io::read_gzip(&mut f,None, &mut bytes, byte_skip);
+                (bytes,h)
+            }
+            Encoding::rawbz2 => {
+                io::read_bzip2(&mut f,None, &mut bytes, byte_skip);
+                (bytes,h)
+            }
+            _=> panic!("unsupported encoding ({}) for now",h.encoding)
+        }
+
+    }
+
+}
+
 
 #[derive(Debug,Clone)]
 pub struct NRRD {
@@ -99,238 +339,52 @@ pub struct NRRD {
     pub comments:Vec<String>,
 }
 
+
+
+
 impl NRRD {
 
-    pub fn write<T:NRRDType>(&self, filepath:impl AsRef<Path>, payload:Vec<T>, attached:bool, encoding:Encoding) {
+    pub fn new_from_dims<T:NRRDType>(dims:&[usize]) -> NRRD {
 
-        let mut h = self.clone();
+        NRRD {
+            magic: Magic::default(),
+            dimension: Dimension::new(dims.len()),
+            dtype: T::dtype(),
+            block_size: None,
+            encoding: Encoding::raw,
+            endian: Endian::default(),
+            content: None,
+            min: None,
+            max: None,
+            old_min: None,
+            old_max: None,
+            data_file: None,
+            line_skip: None,
+            byte_skip: None,
+            sample_units: None,
+            sizes: Sizes::new(dims),
+            spacings: None,
+            thicknesses: None,
+            axis_mins: None,
+            axis_maxs: None,
+            centerings: None,
+            labels: None,
+            units: None,
+            kinds: None,
+            space: None,
+            space_dimension: None,
+            space_units: None,
+            space_origin: None,
+            space_directions: None,
+            key_vals: Default::default(),
+            comments: vec![],
+        }
 
-        let bytes:&[u8] = bytemuck::cast_slice(&payload);
 
-        // assert that the number of bytes make sense
-        let expected_bytes = self.expected_bytes();
-        assert_eq!(bytes.len(),expected_bytes);
-
-        h.dtype = T::dtype();
-
-        // we write in native endianness to avoid overhead of byte swapping
-        h.endian = if NATIVE_LITTLE {
-            Endian::Little
-        }else {
-            Endian::Big
-        };
-
-        // set the encoding
-        h.encoding = encoding;
-
-        // ensure line skip and byte skip are null
-        h.byte_skip = None;
-        h.line_skip = None;
-
-        if attached {
-
-            h.data_file = None;
-            let data_p = filepath.as_ref().with_extension("nhdr");
-            let mut f = File::create(data_p).unwrap();
-            f.write_all(h.to_string().as_bytes()).unwrap();
-            match encoding {
-                Encoding::raw => io::write_raw(&mut f, bytes),
-                Encoding::rawgz => io::write_gzip(&mut f, bytes),
-                Encoding::rawbz2 => io::write_bzip2(&mut f, bytes),
-                _=> panic!("encoding {} not yet supported",h.encoding)
-            };
-
-        }else {
-
-            let ext = match encoding {
-                Encoding::raw => "raw",
-                Encoding::rawgz => "raw.gz",
-                Encoding::rawbz2 => "raw.bz2",
-                _=> panic!("encoding {} not yet supported",h.encoding)
-            };
-
-            let df = Path::new(
-                filepath.as_ref().file_name().unwrap().to_str().unwrap()
-            ).with_extension(ext);
-            h.data_file = Some(DataFile::SingleFile {
-                filename: df,
-            });
-            let data_p = filepath.as_ref().with_extension(ext);
-            let header_p = filepath.as_ref().with_extension("nhdr");
-
-            let mut f = File::create(data_p).unwrap();
-            match encoding {
-                Encoding::raw => io::write_raw(&mut f, bytes),
-                Encoding::rawgz => io::write_gzip(&mut f, bytes),
-                Encoding::rawbz2 => io::write_bzip2(&mut f, bytes),
-                _=> panic!("encoding {} not yet supported",h.encoding)
-            };
-            let mut f = File::create(header_p).unwrap();
-            f.write_all(h.to_string().as_bytes()).unwrap();
-        };
-
-    }
-
-    pub fn read_to<T:FromPrimitive + Zero>(filepath:impl AsRef<Path>) -> (Vec<T>, NRRD) {
-
-        let (bytes,h) = NRRD::read_payload(filepath);
-
-        let n = h.sizes.n_elements();
-
-        let x:Vec<T> = match h.dtype {
-            DType::int8 => bytes.into_iter().map(|byte| T::from_i8(byte as i8).unwrap()).collect(),
-            DType::uint8 => bytes.into_iter().map(|byte| T::from_u8(byte).unwrap()).collect(),
-            DType::int16 => {
-                let mut buf = vec![0i16;n];
-                match h.endian {
-                    Endian::Big => BigEndian::read_i16_into(&bytes, &mut buf),
-                    Endian::Little => LittleEndian::read_i16_into(&bytes, &mut buf),
-                }
-                buf.into_iter().map(|x| T::from_i16(x).unwrap()).collect()
-            }
-            DType::uint16 => {
-                let mut buf = vec![0u16;n];
-                match h.endian {
-                    Endian::Big => BigEndian::read_u16_into(&bytes, &mut buf),
-                    Endian::Little => LittleEndian::read_u16_into(&bytes, &mut buf),
-                }
-                buf.into_iter().map(|x| T::from_u16(x).unwrap()).collect()
-            }
-            DType::int32 => {
-                let mut buf = vec![0i32;n];
-                match h.endian {
-                    Endian::Big => BigEndian::read_i32_into(&bytes, &mut buf),
-                    Endian::Little => LittleEndian::read_i32_into(&bytes, &mut buf),
-                }
-                buf.into_iter().map(|x| T::from_i32(x).unwrap()).collect()
-            }
-            DType::uint32 => {
-                let mut buf = vec![0u32;n];
-                match h.endian {
-                    Endian::Big => BigEndian::read_u32_into(&bytes, &mut buf),
-                    Endian::Little => LittleEndian::read_u32_into(&bytes, &mut buf),
-                }
-                buf.into_iter().map(|x| T::from_u32(x).unwrap()).collect()
-            }
-            DType::int64 => {
-                let mut buf = vec![0i64;n];
-                match h.endian {
-                    Endian::Big => BigEndian::read_i64_into(&bytes, &mut buf),
-                    Endian::Little => LittleEndian::read_i64_into(&bytes, &mut buf),
-                }
-                buf.into_iter().map(|x| T::from_i64(x).unwrap()).collect()
-            }
-            DType::uint64 => {
-                let mut buf = vec![0u64;n];
-                match h.endian {
-                    Endian::Big => BigEndian::read_u64_into(&bytes, &mut buf),
-                    Endian::Little => LittleEndian::read_u64_into(&bytes, &mut buf),
-                }
-                buf.into_iter().map(|x| T::from_u64(x).unwrap()).collect()
-            }
-            DType::f32 => {
-                let mut buf = vec![0f32;n];
-                match h.endian {
-                    Endian::Big => BigEndian::read_f32_into(&bytes, &mut buf),
-                    Endian::Little => LittleEndian::read_f32_into(&bytes, &mut buf),
-                }
-                buf.into_iter().map(|x| T::from_f32(x).unwrap()).collect()
-            }
-            DType::f64 => {
-                let mut buf = vec![0f64;n];
-                match h.endian {
-                    Endian::Big => BigEndian::read_f64_into(&bytes, &mut buf),
-                    Endian::Little => LittleEndian::read_f64_into(&bytes, &mut buf),
-                }
-                buf.into_iter().map(|x| T::from_f64(x).unwrap()).collect()
-            }
-            DType::block => {
-                panic!("cannot read block data into primitive type")
-            }
-        };
-        (x,h)
     }
 
     fn expected_bytes(&self) -> usize {
         self.sizes.n_elements() * self.element_size()
-    }
-
-    pub fn read_payload(filepath:impl AsRef<Path>) -> (Vec<u8>, Self) {
-
-        let mut f = File::open(&filepath).unwrap();
-        let (header_bytes,_offset) = io::read_until_blank(&mut f).expect("failed to read header");
-        let header_str = String::from_utf8(header_bytes).expect("failed to convert bytes to string");
-        let mut header_lines = header_str.lines().collect::<Vec<&str>>();
-        let h = NRRD::full_from_lines(&mut header_lines);
-
-        let n_expected_bytes = h.expected_bytes();
-        let mut bytes = vec![0u8;n_expected_bytes];
-        let line_skip = h.line_skip.as_ref().map(|ls| ls.to_skip()).unwrap_or(0);
-        let (byte_skip,read_tail) = h.byte_skip.as_ref().map(|bs| (bs.to_skip(),bs.read_tail())).unwrap_or((0,false));
-
-        if let Some(datafile) = h.data_file.as_ref() {
-            // this means the header is detached
-
-            // resolve full paths if necessary
-            let resolved_paths = datafile.paths().into_iter().map(|p|{
-                if p.is_relative() {
-                    filepath.as_ref().parent().unwrap().join(p)
-                }else {
-                    p
-                }
-            }).collect::<Vec<PathBuf>>();
-
-            // check that all exist before attempting to read
-            resolved_paths.iter().for_each(|file| {
-                if !file.exists() {
-                    panic!("{} does not exist", file.display());
-                }
-            });
-
-            let n_files = resolved_paths.len();
-            let (bytes_per_file,rem) = n_expected_bytes.div_rem_euclid(&n_files);
-            assert_eq!(rem,0,"number of files ({n_files}) doesn't divide total number of bytes evenly ({n_expected_bytes})");
-
-            bytes.chunks_exact_mut(bytes_per_file).zip(&resolved_paths).for_each(|(chunk,file)|{
-                let mut f = File::open(&file).unwrap();
-                io::skip_lines(&mut f, line_skip);
-                match h.encoding {
-                    Encoding::raw => io::read_raw(&mut f, None, chunk, byte_skip),
-                    Encoding::rawgz => io::read_gzip(&mut f, None, chunk, byte_skip),
-                    Encoding::rawbz2 => io::read_bzip2(&mut f, None, chunk, byte_skip),
-                    _=> panic!("unsupported encoding ({}) for now", h.encoding)
-                };
-            });
-
-            return (bytes,h)
-
-        } else {
-            // this means the header is attached
-            io::skip_lines(&mut f,line_skip);
-
-            match h.encoding {
-                Encoding::raw => {
-                    if read_tail {
-                        io::read_tail(&mut f, &mut bytes);
-                    }else {
-                        io::read_raw(&mut f, None, &mut bytes, byte_skip);
-                    }
-                    return (bytes,h);
-                }
-                Encoding::rawgz => {
-                    io::read_gzip(&mut f,None, &mut bytes, byte_skip);
-                    return (bytes,h);
-                }
-                Encoding::rawbz2 => {
-                    io::read_bzip2(&mut f,None, &mut bytes, byte_skip);
-                }
-                _=> panic!("unsupported encoding ({}) for now",h.encoding)
-            }
-
-        }
-
-        todo!()
-
     }
 
     /// returns the size of each element as determined by 'type' and 'block size' if necessary
@@ -343,9 +397,9 @@ impl NRRD {
         }
     }
 
-    pub fn full_from_lines(lines:&mut Vec<&str>) -> NRRD {
+    pub fn from_lines_full(lines:&mut Vec<&str>) -> NRRD {
 
-        let mut h = Self::minimal_from_lines(lines);
+        let mut h = Self::from_lines_minimal(lines);
 
         h.content = read_header_def(lines);
         h.min = read_header_def(lines);
@@ -383,7 +437,7 @@ impl NRRD {
     }
 
     /// construct a minimal NHDR from a string
-    pub fn minimal_from_lines(lines:&mut Vec<&str>) -> NRRD {
+    pub fn from_lines_minimal(lines:&mut Vec<&str>) -> NRRD {
 
         assert!(!lines.is_empty(),"lines must not be empty");
 
@@ -445,7 +499,6 @@ impl NRRD {
 
 impl Display for NRRD {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-
 
         writeln!(f,"{}",self.magic)?;
 
@@ -558,6 +611,8 @@ impl Display for NRRD {
         if let Some(datafile) = &self.data_file {
             writeln!(f,"{datafile}")?;
         }
+
+        writeln!(f,"")?;
 
         Ok(())
     }

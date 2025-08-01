@@ -38,6 +38,12 @@ pub struct Magic {
     pub version: u8,
 }
 
+impl Default for Magic {
+    fn default() -> Self {
+        Magic { version: 4 }
+    }
+}
+
 impl HeaderDef for Magic {
     fn patterns<'a>() -> &'a [&'a str] {
         &["NRRD"]
@@ -244,7 +250,7 @@ impl Display for SpaceDimension {
 }
 
 /******************************
- *********** SPACE UNITS ***********
+ ******** SPACE UNITS ********
  ****************************/
 
 #[derive(Debug,Clone)]
@@ -401,6 +407,7 @@ impl Display for SpaceDirections {
 /******************************
  **** MEASUREMENT FRAME ******
  ****************************/
+
 pub struct MeasurementFrame {
     frame_vecs:Vec<NrrdVec>,
 }
@@ -440,6 +447,12 @@ impl Display for MeasurementFrame {
 #[derive(Debug,Clone)]
 pub struct Dimension {
     dim:usize,
+}
+
+impl Dimension {
+    pub fn new(dim:usize) -> Self {
+        Dimension{dim}
+    }
 }
 
 impl HeaderDef for Dimension {
@@ -706,10 +719,30 @@ impl Display for Encoding {
  ********** ENDIAN ***********
  ****************************/
 
+#[cfg(target_endian = "little")]
+const NATIVE_LITTLE: bool = true;
+
+#[cfg(target_endian = "big")]
+const NATIVE_LITTLE: bool = false;
+
+fn native_endian() -> Endian {
+    if NATIVE_LITTLE {
+        Endian::Little
+    }else {
+        Endian::Big
+    }
+}
+
 #[derive(Debug,PartialEq,Eq,Clone,Copy)]
 pub enum Endian {
     Big,
     Little,
+}
+
+impl Default for Endian {
+    fn default() -> Self {
+        native_endian()
+    }
 }
 
 impl HeaderDef for Endian {
@@ -1116,6 +1149,14 @@ impl Display for SampleUnits {
 #[derive(Debug,PartialEq,Eq,Clone)]
 pub struct Sizes {
     sizes: Vec<usize>
+}
+
+impl Sizes {
+    pub fn new(sizes: &[usize]) -> Self {
+        Self{
+            sizes: sizes.to_vec()
+        }
+    }
 }
 
 impl Sizes {

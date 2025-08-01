@@ -114,9 +114,11 @@ pub fn write_gzip(
     f: &mut File,
     payload: &[u8],
 ) {
-    let mut enc = GzEncoder::new(f,flate2::Compression::fast());
+    let mut enc = GzEncoder::new(f, flate2::Compression::default());
     enc.write_all(payload).expect("failed to write to GZ");
+    enc.try_finish().unwrap();
 }
+
 
 pub fn read_gzip(
     f: &mut File,
@@ -150,6 +152,7 @@ pub fn write_bzip2(
 ) {
     let mut enc = BzEncoder::new(f,bzip2::Compression::fast());
     enc.write_all(payload).expect("failed to write to BZ");
+    enc.try_finish().unwrap();
 }
 
 pub fn read_with_skip<R:Read>(reader:&mut R, decompressed: &mut [u8], bytes_to_skip: usize) -> usize {
