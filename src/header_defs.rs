@@ -202,18 +202,18 @@ impl Display for Space {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         use Space::*;
         match self {
-            RAS => write!(f, "right-anterior-superior"),
-            LAS => write!(f, "left-anterior-superior"),
-            LPS => write!(f, "left-posterior-superior"),
-            RAST => write!(f, "right-anterior-superior-time"),
-            LAST => write!(f, "left-anterior-superior-time"),
-            LPST => write!(f, "left-posterior-superior-time"),
-            scanner_xyz => write!(f, "scanner-xyz" ),
-            scanner_xyz_time => write!(f, "scanner-xyz-time" ),
-            _3D_right_handed => write!(f, "3D-right-handed" ),
-            _3D_left_handed => write!(f, "3D-left-handed" ),
-            _3D_right_handed_time => write!(f, "3D-right-handed-time" ),
-            _3D_left_handed_time => write!(f, "3D-left-handed-time" ),
+            RAS => write!(f, "{}right-anterior-superior", Self::patterns()[0]),
+            LAS => write!(f, "{}left-anterior-superior", Self::patterns()[0]),
+            LPS => write!(f, "{}left-posterior-superior", Self::patterns()[0]),
+            RAST => write!(f, "{}right-anterior-superior-time", Self::patterns()[0]),
+            LAST => write!(f, "{}left-anterior-superior-time", Self::patterns()[0]),
+            LPST => write!(f, "{}left-posterior-superior-time", Self::patterns()[0]),
+            scanner_xyz => write!(f, "{}scanner-xyz", Self::patterns()[0]),
+            scanner_xyz_time => write!(f, "{} scanner-xyz-time", Self::patterns()[0]),
+            _3D_right_handed => write!(f, "{}3D-right-handed", Self::patterns()[0]),
+            _3D_left_handed => write!(f, "{}3D-left-handed", Self::patterns()[0]),
+            _3D_right_handed_time => write!(f, "{}3D-right-handed-time", Self::patterns()[0]),
+            _3D_left_handed_time => write!(f, "{}3D-left-handed-time", Self::patterns()[0]),
         }
     }
 }

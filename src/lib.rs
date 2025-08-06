@@ -656,7 +656,7 @@ fn read_header_def<T:HeaderDef + FromStr>(header_lines: &mut Vec<&str>) -> Optio
     let found = header_lines.iter().enumerate().find_map(|(i,x)|{
         if T::matches(x) {
             match T::from_str(x) {
-                Ok(f) => return Some((i,f)),
+                Ok(f) => Some((i,f)),
                 Err(_) => panic!("failed to parse header line {x}")
             }
         }else {
@@ -676,7 +676,7 @@ fn read_data_file(header_lines: &mut Vec<&str>) -> Option<DataFile> {
     let mut found = header_lines.iter().enumerate().find_map(|(i,x)|{
         if DataFile::matches(x) {
             match DataFile::from_str(x) {
-                Ok(f) => return Some((i,f)),
+                Ok(f) => Some((i,f)),
                 Err(_) => panic!("failed to parse header line {x}")
             }
         }else {
