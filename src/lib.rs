@@ -1,4 +1,3 @@
-use std::any::Any;
 use std::collections::HashMap;
 use std::fmt::{Debug, Display, Formatter};
 use std::fs::File;
@@ -6,7 +5,7 @@ use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::str::FromStr;
 use byteorder::{BigEndian, ByteOrder, LittleEndian};
-use num_traits::{Euclid, FromPrimitive, ToPrimitive, Zero};
+use num_traits::{Euclid, FromPrimitive};
 
 pub mod header_defs;
 mod io;
@@ -24,10 +23,10 @@ mod tests {
     pub fn read_header() {
         let test_header = "test_nrrds/detached_list.nhdr";
         let mut f = File::open(test_header).unwrap();
-        let (header_bytes,offset) = io::read_until_blank(&mut f).expect("failed to read header");
+        let (header_bytes,..) = io::read_until_blank(&mut f).expect("failed to read header");
         let header_str = String::from_utf8(header_bytes).expect("failed to convert bytes to string");
         let mut header_lines = header_str.lines().collect::<Vec<&str>>();
-        let h = NRRD::from_lines_full(&mut header_lines);
+        let _ = NRRD::from_lines_full(&mut header_lines);
         // this means we accounted for every line in the string
         assert!(header_lines.is_empty());
     }
@@ -37,7 +36,7 @@ mod tests {
 
         let test_header = "test_nrrds/detached_multi.nhdr";
         let mut f = File::open(test_header).unwrap();
-        let (header_bytes,offset) = io::read_until_blank(&mut f).expect("failed to read header");
+        let (header_bytes,..) = io::read_until_blank(&mut f).expect("failed to read header");
         let header_str = String::from_utf8(header_bytes).expect("failed to convert bytes to string");
         let mut header_lines = header_str.lines().collect::<Vec<&str>>();
         let h = NRRD::from_lines_full(&mut header_lines);
@@ -46,7 +45,7 @@ mod tests {
 
         println!("{h}");
         let paths = h.data_file.as_ref().unwrap().paths();
-        println!("{:?}",paths);
+        println!("{paths:?}");
     }
 
     #[test]
@@ -62,7 +61,7 @@ mod tests {
 
         for encoding in encodings {
             write_nrrd("test_out", &nrrd, &data, attached, encoding);
-            let (data_,nrrd) = read_nrrd_to::<i8>("test_out.nrrd");
+            let (data_,..) = read_nrrd_to::<i8>("test_out.nrrd");
             let data_ = data_.into_iter().map(|x| x as f64).collect::<Vec<f64>>();
             assert_eq!(data_,data);
             fs::remove_file("test_out.nrrd").unwrap();
@@ -284,7 +283,7 @@ pub fn read_payload(filepath:impl AsRef<Path>) -> (Vec<u8>, NRRD) {
         assert_eq!(rem,0,"number of files ({n_files}) doesn't divide total number of bytes evenly ({n_expected_bytes})");
 
         bytes.chunks_exact_mut(bytes_per_file).zip(&resolved_paths).for_each(|(chunk,file)|{
-            let mut f = File::open(&file).unwrap();
+            let mut f = File::open(file).unwrap();
             io::skip_lines(&mut f, line_skip);
             match h.encoding {
                 Encoding::raw => io::read_raw(&mut f, None, chunk, byte_skip),
@@ -536,103 +535,103 @@ impl Display for NRRD {
         writeln!(f,"{}",self.magic)?;
 
         for comment in &self.comments {
-            writeln!(f,"{}",comment)?;
+            writeln!(f,"{comment}")?;
         }
 
         writeln!(f,"{}",self.dimension)?;
         writeln!(f,"{}",self.dtype)?;
 
         if let Some(block_size) = &self.block_size {
-            writeln!(f,"{}",block_size)?;
+            writeln!(f,"{block_size}")?;
         }
 
         writeln!(f,"{}",self.encoding)?;
         writeln!(f,"{}",self.endian)?;
 
         if let Some(content) = &self.content {
-            writeln!(f,"{}",content)?;
+            writeln!(f,"{content}")?;
         }
 
         if let Some(min) = &self.min {
-            writeln!(f,"{}",min)?;
+            writeln!(f,"{min}")?;
         }
 
         if let Some(max) = &self.max {
-            writeln!(f,"{}",max)?;
+            writeln!(f,"{max}")?;
         }
 
         if let Some(old_min) = &self.old_min {
-            writeln!(f,"{}",old_min)?;
+            writeln!(f,"{old_min}")?;
         }
 
         if let Some(old_max) = &self.old_max {
-            writeln!(f,"{}",old_max)?;
+            writeln!(f,"{old_max}")?;
         }
 
         if let Some(line_skip) = &self.line_skip {
-            writeln!(f,"{}",line_skip)?;
+            writeln!(f,"{line_skip}")?;
         }
 
         if let Some(byte_skip) = &self.byte_skip {
-            writeln!(f,"{}",byte_skip)?;
+            writeln!(f,"{byte_skip}")?;
         }
 
         if let Some(sample_units) = &self.sample_units {
-            writeln!(f,"{}",sample_units)?;
+            writeln!(f,"{sample_units}")?;
         }
 
         writeln!(f,"{}",self.sizes)?;
 
         if let Some(spacings) = &self.spacings {
-            writeln!(f,"{}",spacings)?;
+            writeln!(f,"{spacings}")?;
         }
 
         if let Some(thicknesses) = &self.thicknesses {
-            writeln!(f,"{}",thicknesses)?;
+            writeln!(f,"{thicknesses}")?;
         }
 
         if let Some(axis_mins) = &self.axis_mins {
-            writeln!(f,"{}",axis_mins)?;
+            writeln!(f,"{axis_mins}")?;
         }
 
         if let Some(axis_maxs) = &self.axis_maxs {
-            writeln!(f,"{}",axis_maxs)?;
+            writeln!(f,"{axis_maxs}")?;
         }
 
         if let Some(centerings) = &self.centerings {
-            writeln!(f,"{}",centerings)?;
+            writeln!(f,"{centerings}")?;
         }
 
         if let Some(labels) = &self.labels {
-            writeln!(f,"{}",labels)?;
+            writeln!(f,"{labels}")?;
         }
 
         if let Some(units) = &self.units {
-            writeln!(f,"{}",units)?;
+            writeln!(f,"{units}")?;
         }
 
         if let Some(kinds) = &self.kinds {
-            writeln!(f,"{}",kinds)?;
+            writeln!(f,"{kinds}")?;
         }
 
         if let Some(space) = &self.space {
-            writeln!(f,"{}",space)?;
+            writeln!(f,"{space}")?;
         }
 
         if let Some(space_dimension) = &self.space_dimension {
-            writeln!(f,"{}",space_dimension)?;
+            writeln!(f,"{space_dimension}")?;
         }
 
         if let Some(space_units) = &self.space_units {
-            writeln!(f,"{}",space_units)?;
+            writeln!(f,"{space_units}")?;
         }
 
         if let Some(space_origin) = &self.space_origin {
-            writeln!(f,"{}",space_origin)?;
+            writeln!(f,"{space_origin}")?;
         }
 
         if let Some(space_directions) = &self.space_directions {
-            writeln!(f,"{}",space_directions)?;
+            writeln!(f,"{space_directions}")?;
         }
 
         let mut keyvals:Vec<(String,Value)> = self.key_vals.iter().map(|(key,value)| (key.clone(),value.clone()) ).collect();
@@ -644,8 +643,6 @@ impl Display for NRRD {
         if let Some(datafile) = &self.data_file {
             writeln!(f,"{datafile}")?;
         }
-
-        writeln!(f,"")?;
 
         Ok(())
     }
@@ -686,7 +683,7 @@ fn read_data_file(header_lines: &mut Vec<&str>) -> Option<DataFile> {
 
     // insert remaining header lines if the data file spec is a list
     if let Some((idx,df)) = found.as_mut() {
-        if let DataFile::List {sub_dim, file_paths: filepaths } = df {
+        if let DataFile::List {file_paths: filepaths,.. } = df {
             // the remaining lines must be the files listed out
             //let mut c = 0;
             header_lines[(*idx+1)..].iter().for_each(|line|{

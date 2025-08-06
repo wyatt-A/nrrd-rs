@@ -1,8 +1,8 @@
-use std::fmt::{write, Display, Formatter};
-use std::path::{Path, PathBuf};
+use std::fmt::{Display, Formatter};
+use std::path::PathBuf;
 use std::str::FromStr;
 use bytemuck::Pod;
-use regex::{Regex, RegexSet, SubCaptureMatches};
+use regex::{Regex, RegexSet};
 use sprintf::sprintf;
 
 /// Header Definition
@@ -62,7 +62,7 @@ impl FromStr for Magic {
 
 impl Display for Magic {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}", format!("NRRD000{}", self.version))
+        write!(f, "{}", format_args!("NRRD000{}", self.version))
     }
 }
 
@@ -193,7 +193,7 @@ impl FromStr for Space {
             "3d-left-handed" => Ok(_3D_left_handed),
             "3d-right-handed-time" => Ok(_3D_right_handed_time),
             "3d-left-handed-time" => Ok(_3D_left_handed_time),
-            _ => panic!("invalid space: {}", s)
+            _ => panic!("invalid space: {s}")
         }
     }
 }
@@ -281,7 +281,7 @@ impl Display for SpaceUnits {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         write!(f,"{}{}",
                Self::patterns()[0],
-               self.units.iter().map(|x|format!("\"{}\"", x)).collect::<Vec<_>>().join(" ")
+               self.units.iter().map(|x|format!("\"{x}\"")).collect::<Vec<_>>().join(" ")
         )
     }
 }
@@ -302,7 +302,7 @@ impl FromStr for NrrdVec {
         let trimmed = s.trim();
 
         if !(trimmed.starts_with('(') && trimmed.ends_with(')')) {
-            panic!("invalid NRD vector: {}", s);
+            panic!("invalid NRD vector: {s}");
         }
 
         // Strip outer parens
@@ -329,7 +329,7 @@ impl FromStr for NrrdVec {
 
 impl Display for NrrdVec {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        let s:Vec<_> = self.v.iter().map(|x| format!("{:.17}", x)).collect();
+        let s:Vec<_> = self.v.iter().map(|x| format!("{x:.17}")).collect();
         write!(f,"({})",s.join(","))
     }
 }
@@ -602,7 +602,7 @@ impl FromStr for DType {
             "float" => f32,
             "double" => f64,
             "block" => block,
-            _=> panic!("unknown data type {}",s)
+            _=> panic!("unknown data type {s}")
         };
         Ok(t)
     }
@@ -697,7 +697,7 @@ impl FromStr for Encoding {
             "gz" | "gzip" => rawgz,
             "bz2" | "bzip2" =>  rawbz2,
             "hex" => hex,
-            _=> panic!("unknown encoding {}",s)
+            _=> panic!("unknown encoding {s}")
         };
         Ok(e)
     }
@@ -766,7 +766,7 @@ impl FromStr for Endian {
         match s.as_str() {
             "big" => Ok(Endian::Big),
             "little" => Ok(Endian::Little),
-            _=> panic!("endianness: {} not recognized", s),
+            _=> panic!("endianness: {s} not recognized"),
         }
     }
 }
@@ -928,7 +928,7 @@ impl Display for OldMax {
 pub enum DataFile {
     SingleFile{filename: PathBuf},
     FileFormat{fmt_string: String, min:i32, max:i32, step:i32, sub_dim: Option<usize>},
-    List{sub_dim: Option<usize>, file_paths: Vec<PathBuf>},
+    List{file_paths: Vec<PathBuf>,sub_dim: Option<usize>},
 }
 
 impl DataFile {
@@ -937,7 +937,7 @@ impl DataFile {
 
         match &self {
             DataFile::SingleFile { filename } => vec![filename.clone()],
-            DataFile::FileFormat { fmt_string, min, max, step, sub_dim } => {
+            DataFile::FileFormat { fmt_string, min, max, step, .. } => {
                 let mut paths = vec![];
                 if *step > 0 {
                     for i in (min.abs()..=max.abs()).step_by(*step as usize) {
@@ -947,7 +947,7 @@ impl DataFile {
                     }
                 }
                 if *step < 0 {
-                    for i in (max.abs()..=min.abs()).rev().step_by(step.abs() as usize) {
+                    for i in (max.abs()..=min.abs()).rev().step_by(step.unsigned_abs() as usize) {
                         paths.push(
                             PathBuf::from(sprintf!(fmt_string, i).unwrap())
                         )
@@ -1017,13 +1017,11 @@ impl Display for DataFile {
                     }else {
                         write!(f,"{}LIST {sub_dim}",Self::patterns()[0])
                     }
+                }else if !files.is_empty() {
+                    writeln!(f,"{}LIST",Self::patterns()[0])?;
+                    write!(f,"{}",files.join("\n"))
                 }else {
-                    if !files.is_empty() {
-                        writeln!(f,"{}LIST",Self::patterns()[0])?;
-                        write!(f,"{}",files.join("\n"))
-                    }else {
-                        write!(f,"{}LIST",Self::patterns()[0])
-                    }
+                    write!(f,"{}LIST",Self::patterns()[0])
                 }
             }
         }
@@ -1457,7 +1455,7 @@ impl Display for Labels {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         write!(f,"{}{}",
             Self::patterns()[0],
-            self.labels.iter().map(|x|format!("\"{}\"", x)).collect::<Vec<_>>().join(" ")
+            self.labels.iter().map(|x|format!("\"{x}\"")).collect::<Vec<_>>().join(" ")
         )
     }
 }
@@ -1494,7 +1492,7 @@ impl Display for Units {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         write!(f,"{}{}",
                Self::patterns()[0],
-               self.units.iter().map(|x|format!("\"{}\"", x)).collect::<Vec<_>>().join(" ")
+               self.units.iter().map(|x|format!("\"{x}\"")).collect::<Vec<_>>().join(" ")
         )
     }
 }
@@ -1654,7 +1652,7 @@ impl FromStr for Kind {
             "3D-matrix" => Ok(_3D_matrix),
             "3D-masked-matrix" => Ok(_3D_masked_matrix),
             "none" => Ok(none),
-            _ => panic!("invalid kind type {}",s),
+            _ => panic!("invalid kind type {s}"),
         }
     }
 }
