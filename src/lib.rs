@@ -8,7 +8,7 @@ use byteorder::{BigEndian, ByteOrder, LittleEndian};
 use num_traits::{Euclid, FromPrimitive};
 
 pub mod header_defs;
-mod io;
+pub mod io;
 
 use header_defs::{AxisMaxs, AxisMins, BlockSize, ByteSkip, Centerings, Comment, Content, DType, DataFile, Dimension, Encoding, Endian, HeaderDef, Kinds, Labels, LineSkip, Magic, Max, Min, NRRDType, OldMax, OldMin, SampleUnits, Sizes, Space, SpaceDimension, SpaceDirections, SpaceOrigin, SpaceUnits, Spacings, Thicknesses, Units, Value};
 
@@ -208,21 +208,19 @@ pub fn write_nrrd<T:NRRDType>(filepath:impl AsRef<Path>, ref_header:&NRRD, data:
         let data_p = filepath.as_ref().with_extension("nrrd");
         let mut f = File::create(data_p).unwrap();
         f.write_all(h.to_string().as_bytes()).unwrap();
-        match encoding {
-            Encoding::raw => io::write_raw(&mut f, bytes),
-            Encoding::rawgz => io::write_gzip(&mut f, bytes),
-            Encoding::rawbz2 => io::write_bzip2(&mut f, bytes),
-            _=> panic!("encoding {} not yet supported",h.encoding)
-        };
+
+        encoding.write_payload(&mut f, bytes);
+
+        // match encoding {
+        //     Encoding::raw => io::write_raw(&mut f, bytes),
+        //     Encoding::rawgz => io::write_gzip(&mut f, bytes),
+        //     Encoding::rawbz2 => io::write_bzip2(&mut f, bytes),
+        //     _=> panic!("encoding {} not yet supported",h.encoding)
+        // };
 
     }else {
 
-        let ext = match encoding {
-            Encoding::raw => "raw",
-            Encoding::rawgz => "raw.gz",
-            Encoding::rawbz2 => "raw.bz2",
-            _=> panic!("encoding {} not yet supported",h.encoding)
-        };
+        let ext = encoding.file_ext();
 
         let df = Path::new(
             filepath.as_ref().file_name().unwrap().to_str().unwrap()
@@ -234,12 +232,15 @@ pub fn write_nrrd<T:NRRDType>(filepath:impl AsRef<Path>, ref_header:&NRRD, data:
         let header_p = filepath.as_ref().with_extension("nhdr");
 
         let mut f = File::create(data_p).unwrap();
-        match encoding {
-            Encoding::raw => io::write_raw(&mut f, bytes),
-            Encoding::rawgz => io::write_gzip(&mut f, bytes),
-            Encoding::rawbz2 => io::write_bzip2(&mut f, bytes),
-            _=> panic!("encoding {} not yet supported",h.encoding)
-        };
+
+        encoding.write_payload(&mut f, bytes);
+
+        // match encoding {
+        //     Encoding::raw => io::write_raw(&mut f, bytes),
+        //     Encoding::rawgz => io::write_gzip(&mut f, bytes),
+        //     Encoding::rawbz2 => io::write_bzip2(&mut f, bytes),
+        //     _=> panic!("encoding {} not yet supported",h.encoding)
+        // };
         let mut f = File::create(header_p).unwrap();
         f.write_all(h.to_string().as_bytes()).unwrap();
     };

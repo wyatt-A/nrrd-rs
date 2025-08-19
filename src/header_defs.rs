@@ -1,9 +1,11 @@
 use std::fmt::{Display, Formatter};
+use std::fs::File;
 use std::path::PathBuf;
 use std::str::FromStr;
 use bytemuck::Pod;
 use regex::{Regex, RegexSet};
 use sprintf::sprintf;
+use crate::io;
 
 /// Header Definition
 pub trait HeaderDef {
@@ -675,6 +677,26 @@ pub enum Encoding {
     hex,
     rawgz,
     rawbz2,
+}
+
+impl Encoding {
+    pub fn file_ext(&self) -> &str {
+        match self {
+            Encoding::raw => "raw",
+            Encoding::rawgz => "raw.gz",
+            Encoding::rawbz2 => "raw.bz2",
+            _=> panic!("encoding {} not yet supported",self)
+        }
+    }
+
+    pub fn write_payload(&self,f:&mut File, bytes:&[u8]) {
+        match self {
+            Encoding::raw => io::write_raw(f, bytes),
+            Encoding::rawgz => io::write_gzip(f, bytes),
+            Encoding::rawbz2 => io::write_bzip2(f, bytes),
+            _=> panic!("encoding {} not yet supported",self)
+        };
+    }
 }
 
 impl HeaderDef for Encoding {
