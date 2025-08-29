@@ -377,6 +377,12 @@ impl NRRD {
         self.sizes.shape()
     }
 
+    pub fn new_from_type_dims(t:DType,dims:&[usize]) -> NRRD {
+        let mut nhdr = NRRD::new_from_dims::<u8>(dims);
+        nhdr.dtype = t;
+        nhdr
+    }
+
     pub fn new_from_dims<T:NRRDType>(dims:&[usize]) -> NRRD {
 
         NRRD {

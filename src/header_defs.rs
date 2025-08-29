@@ -229,6 +229,12 @@ pub struct SpaceDimension {
     dim:usize
 }
 
+impl SpaceDimension {
+    pub fn new(dim:usize) -> SpaceDimension {
+        SpaceDimension{dim}
+    }
+}
+
 impl HeaderDef for SpaceDimension {
     fn patterns<'a>() -> &'a [&'a str] {
         &["space dimension: "]
@@ -258,6 +264,22 @@ impl Display for SpaceDimension {
 #[derive(Debug,Clone)]
 pub struct SpaceUnits {
     units: Vec<String>
+}
+
+impl SpaceUnits {
+    /// construct space units in mm over n dimensions
+    pub fn new_mm(n_dims:usize) -> SpaceUnits {
+        SpaceUnits {
+            units: vec!["mm".to_string();n_dims]
+        }
+    }
+
+    /// construct space units from a list of strings
+    pub fn from_list(units:&[&str]) -> SpaceUnits {
+        SpaceUnits {
+            units: units.iter().map(|s| s.to_string()).collect()
+        }
+    }
 }
 
 impl HeaderDef for SpaceUnits {
@@ -295,6 +317,14 @@ impl Display for SpaceUnits {
 #[derive(Debug,Clone)]
 pub struct NrrdVec {
     v: Vec<f64>
+}
+
+impl NrrdVec {
+    pub fn new(v:&[f64]) -> NrrdVec {
+        NrrdVec {
+            v: v.to_vec()
+        }
+    }
 }
 
 impl FromStr for NrrdVec {
@@ -345,6 +375,12 @@ pub struct SpaceOrigin {
     origin: NrrdVec,
 }
 
+impl SpaceOrigin {
+    pub fn new(origin:&[f64]) -> SpaceOrigin {
+        SpaceOrigin{origin:NrrdVec::new(origin)}
+    }
+}
+
 impl HeaderDef for SpaceOrigin {
     fn patterns<'a>() -> &'a [&'a str] {
         &["space origin: "]
@@ -373,6 +409,22 @@ impl Display for SpaceOrigin {
 #[derive(Debug,Clone)]
 pub struct SpaceDirections {
     directions:Vec<Option<NrrdVec>>,
+}
+
+impl SpaceDirections {
+    pub fn from_spacing(spacing:&[f64]) -> SpaceDirections {
+        let n = spacing.len();
+        let directions:Vec<Option<NrrdVec>> = (0..n).map(|i|{
+            let mut dir = vec![0.;n];
+            dir[i] = spacing[i];
+            Some(NrrdVec::new(&dir))
+        }).collect();
+        SpaceDirections{directions}
+    }
+
+    pub fn len(&self) -> usize {
+        self.directions.len()
+    }
 }
 
 impl HeaderDef for SpaceDirections {
@@ -585,6 +637,23 @@ impl DType {
             DType::block => 1, // placeholder for blocksize
         }
     }
+
+    pub fn new(dtype:&str) -> Self {
+        match dtype.trim() {
+            "signed char" | "int8" | "int8_t" => DType::int8,
+            "uchar" | "unsigned char" | "uint8" | "uint8_t" => DType::uint8,
+            "short" | "short int" | "signed short" | "signed short int" | "int16" | "int16_t" => DType::int16,
+            "ushort" | "unsigned short" | "unsigned short int" | "uint16" | "uint16_t"  => DType::uint16,
+            "int" | "signed int" | "int32" | "int32_t" => DType::int32,
+            "uint" | "unsigned int" | "uint32" | "uint32_t" => DType::uint32,
+            "longlong" | "long long" | "long long int" | "signed long long" | "signed long long int" | "int64" | "int64_t" => DType::int64,
+            "ulonglong" | "unsigned long long" | "unsigned long long int" | "uint64" | "uint64_t" => DType::uint64,
+            "float" => DType::f32,
+            "double" => DType::f64,
+            "block" => DType::block,
+            _=> panic!("unknown data type {dtype}")
+        }
+    }
 }
 
 impl FromStr for DType {
@@ -592,20 +661,21 @@ impl FromStr for DType {
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         let idx = DType::idx(s).unwrap();
         use DType::*;
-        let t = match s[idx..].trim() {
-            "signed char" | "int8" | "int8_t" => int8,
-            "uchar" | "unsigned char" | "uint8" | "uint8_t" => uint8,
-            "short" | "short int" | "signed short" | "signed short int" | "int16" | "int16_t" => int16,
-            "ushort" | "unsigned short" | "unsigned short int" | "uint16" | "uint16_t"  => uint16,
-            "int" | "signed int" | "int32" | "int32_t" => int32,
-            "uint" | "unsigned int" | "uint32" | "uint32_t" => uint32,
-            "longlong" | "long long" | "long long int" | "signed long long" | "signed long long int" | "int64" | "int64_t" => int64,
-            "ulonglong" | "unsigned long long" | "unsigned long long int" | "uint64" | "uint64_t" => uint64,
-            "float" => f32,
-            "double" => f64,
-            "block" => block,
-            _=> panic!("unknown data type {s}")
-        };
+        let t = Self::new(s[idx..].trim());
+        // let t = match s[idx..].trim() {
+        //     "signed char" | "int8" | "int8_t" => int8,
+        //     "uchar" | "unsigned char" | "uint8" | "uint8_t" => uint8,
+        //     "short" | "short int" | "signed short" | "signed short int" | "int16" | "int16_t" => int16,
+        //     "ushort" | "unsigned short" | "unsigned short int" | "uint16" | "uint16_t"  => uint16,
+        //     "int" | "signed int" | "int32" | "int32_t" => int32,
+        //     "uint" | "unsigned int" | "uint32" | "uint32_t" => uint32,
+        //     "longlong" | "long long" | "long long int" | "signed long long" | "signed long long int" | "int64" | "int64_t" => int64,
+        //     "ulonglong" | "unsigned long long" | "unsigned long long int" | "uint64" | "uint64_t" => uint64,
+        //     "float" => f32,
+        //     "double" => f64,
+        //     "block" => block,
+        //     _=> panic!("unknown data type {s}")
+        // };
         Ok(t)
     }
 }
@@ -1236,6 +1306,17 @@ pub struct Spacings {
     spacings: Vec<f64>
 }
 
+impl Spacings {
+    pub fn new(spacings: &[f64]) -> Spacings {
+        Spacings {
+            spacings: spacings.to_vec()
+        }
+    }
+    pub fn len(&self) -> usize {
+        self.spacings.len()
+    }
+}
+
 impl HeaderDef for Spacings {
     fn patterns<'a>() -> &'a [&'a str] {
         &["spacings: "]
@@ -1526,6 +1607,14 @@ impl Display for Units {
 #[derive(Debug,Clone)]
 pub struct Kinds {
     kinds: Vec<Kind>
+}
+
+impl Kinds {
+    pub fn new(kind:Kind,n:usize) -> Kinds {
+        Kinds {
+            kinds: vec![kind;n],
+        }
+    }
 }
 
 impl HeaderDef for Kinds {
