@@ -17,8 +17,6 @@ pub trait HeaderDef {
             .is_match(s)
     }
 
-
-
     /// return the byte index in 's' of the first character after the pattern match
     fn idx(s:&str) -> Option<usize> {
         for pat in Self::patterns() {
@@ -412,14 +410,30 @@ pub struct SpaceDirections {
 }
 
 impl SpaceDirections {
-    pub fn from_spacing(spacing:&[f64]) -> SpaceDirections {
-        let n = spacing.len();
+    pub fn from_spacing(spacing_mm:&[f64]) -> SpaceDirections {
+        let mut s = SpaceDirections::new();
+        s.extend_from_spacing(spacing_mm);
+        s
+    }
+
+    /// push a "none" to the space directions
+    pub fn extend_none(&mut self) {
+        self.directions.push(None);
+    }
+
+    /// extend with voxel spacing in mm
+    pub fn extend_from_spacing(&mut self, spacing_mm: &[f64]) {
+        let n = spacing_mm.len();
         let directions:Vec<Option<NrrdVec>> = (0..n).map(|i|{
             let mut dir = vec![0.;n];
-            dir[i] = spacing[i];
+            dir[i] = spacing_mm[i];
             Some(NrrdVec::new(&dir))
         }).collect();
-        SpaceDirections{directions}
+        self.directions.extend_from_slice(&directions);
+    }
+
+    pub fn new() -> SpaceDirections {
+        SpaceDirections {directions:Vec::new()}
     }
 
     pub fn len(&self) -> usize {
@@ -1615,6 +1629,13 @@ impl Kinds {
             kinds: vec![kind;n],
         }
     }
+
+    pub fn from_vec(kinds:Vec<Kind>) -> Kinds {
+        Kinds {
+            kinds
+        }
+    }
+
 }
 
 impl HeaderDef for Kinds {
