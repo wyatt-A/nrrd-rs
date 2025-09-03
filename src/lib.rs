@@ -246,6 +246,15 @@ pub fn write_nrrd<T:NRRDType>(filepath:impl AsRef<Path>, ref_header:&NRRD, data:
     };
 }
 
+/// reads only the header of the nhdr or nrrd
+pub fn read_header(nrrd:impl AsRef<Path>) -> NRRD {
+    let mut f = File::open(nrrd.as_ref()).unwrap();
+    let (header_bytes,..) = io::read_until_blank(&mut f).expect("failed to read header");
+    let header_str = String::from_utf8(header_bytes).expect("failed to convert bytes to string");
+    let mut header_lines = header_str.lines().collect::<Vec<&str>>();
+    NRRD::from_lines_full(&mut header_lines)
+}
+
 /// reads the nrrd header and all associated data bytes into a single vector
 pub fn read_payload(filepath:impl AsRef<Path>) -> (Vec<u8>, NRRD) {
 

@@ -9,61 +9,61 @@ use clap::Parser;
 use nrrd_rs::NRRD;
 use nrrd_rs::header_defs::{DType, DataFile, Encoding, Endian, Kind, Kinds, SpaceDimension, SpaceDirections, SpaceOrigin, SpaceUnits};
 
-#[derive(Parser, Debug)]
-struct Args {
-
-    /// output nhdr file path
-    nhdr:PathBuf,
-
-    /// data type of .raw files.
-    /// Example: `-d ushort` Data type specifiers are defined in the NRRD docs
-    #[clap(short,long)]
-    dtype: String,
-
-    /// endianness of .raw files.
-    /// Example: `-e big` or `-e little`
-    #[clap(short,long)]
-    endianness: String,
-
-    /// image dimensions for each .raw file.
-    /// Example: `--file-dims [128 128]`
-    #[clap(long)]
-    file_dims: String,
-
-    /// format string to define the collection of files.
-    /// Example: `--fmt-str /Volumes/data/img_slice_%03i.raw`
-    #[clap(long)]
-    fmt_str: String,
-
-    /// number of raw files to read. This dimension will be appended to the ones provided.
-    /// Example: `-n 360`
-    #[clap(short,long)]
-    n_raw_files:usize,
-
-    /// starting index for fmt string.
-    /// Example: `-s 1` will produce a range 1...=n. Default is 0
-    #[clap(long)]
-    start_idx:Option<usize>,
-
-    /// the step size of for iterating through image index
-    /// Example: `-s 2` will produce a range 0,2,4,6 ... n
-    #[clap(long)]
-    step:Option<usize>,
-
-    /// specify the sample spacing in units of microns
-    /// Example: `--spacing-um [30 30 30]`
-    #[clap(long)]
-    spacing_um: Option<String>,
-
-    /// specify the sample spacing in units of millimeters
-    /// Example: `--spacing-mm [0.03 0.03 0.03]`
-    #[clap(long)]
-    spacing_mm: Option<String>,
-
-    /// center the origin of nhdr
-    #[clap(short,long)]
-    center_origin: bool
-}
+// #[derive(Parser, Debug)]
+// struct Args {
+//
+//     /// output nhdr file path
+//     nhdr:PathBuf,
+//
+//     /// data type of .raw files.
+//     /// Example: `-d ushort` Data type specifiers are defined in the NRRD docs
+//     #[clap(short,long)]
+//     dtype: String,
+//
+//     /// endianness of .raw files.
+//     /// Example: `-e big` or `-e little`
+//     #[clap(short,long)]
+//     endianness: String,
+//
+//     /// image dimensions for each .raw file.
+//     /// Example: `--file-dims [128 128]`
+//     #[clap(long)]
+//     file_dims: String,
+//
+//     /// format string to define the collection of files.
+//     /// Example: `--fmt-str /Volumes/data/img_slice_%03i.raw`
+//     #[clap(long)]
+//     fmt_str: String,
+//
+//     /// number of raw files to read. This dimension will be appended to the ones provided.
+//     /// Example: `-n 360`
+//     #[clap(short,long)]
+//     n_raw_files:usize,
+//
+//     /// starting index for fmt string.
+//     /// Example: `-s 1` will produce a range 1...=n. Default is 0
+//     #[clap(long)]
+//     start_idx:Option<usize>,
+//
+//     /// the step size of for iterating through image index
+//     /// Example: `-s 2` will produce a range 0,2,4,6 ... n
+//     #[clap(long)]
+//     step:Option<usize>,
+//
+//     /// specify the sample spacing in units of microns
+//     /// Example: `--spacing-um [30 30 30]`
+//     #[clap(long)]
+//     spacing_um: Option<String>,
+//
+//     /// specify the sample spacing in units of millimeters
+//     /// Example: `--spacing-mm [0.03 0.03 0.03]`
+//     #[clap(long)]
+//     spacing_mm: Option<String>,
+//
+//     /// center the origin of nhdr
+//     #[clap(short,long)]
+//     center_origin: bool
+// }
 
 #[derive(Parser, Debug)]
 /// Args for build a complex-valued nhdr
@@ -72,6 +72,8 @@ pub struct BuildArgs {
     /// file to save the header to
     output_nhdr:PathBuf,
 
+    /// specify dimensions of the image:
+    /// Example: `--dims [512,512,30]`
     #[clap(long)]
     dims:String,
 
@@ -123,6 +125,7 @@ pub struct BuildArgs {
 
     /// specify the voxel size for the spatial dimensions in mm. If none is given, voxel size is
     /// assumed to be 1mm isotropic
+    /// Example: `[0.03,0.03,0.03]`
     #[clap(long)]
     vox_size_mm:Option<String>,
 
@@ -168,23 +171,27 @@ fn build_nrrd(args: &BuildArgs) -> Result<NRRD,String> {
 
     nrrd.data_file = Some(data_file);
 
-    let mut k = if args.complex {
-        vec![Kind::complex]
+    let kinds = if args.complex {
+        let mut k = vec![Kind::complex];
+        k.extend_from_slice(&vec![Kind::domain;dims.len() - 1]);
+        Kinds::from_vec(k)
     }else {
-        vec![]
+        Kinds::from_vec(vec![Kind::domain;dims.len()])
     };
 
-    k.extend_from_slice(&vec![Kind::domain;dims.len()]);
-    let kinds = Kinds::from_vec(
-        k
-    );
-
     nrrd.kinds = Some(kinds);
-    nrrd.space_dimension = Some(SpaceDimension::new(dims.len()));
+
+    if args.complex {
+        nrrd.space_dimension = Some(SpaceDimension::new(dims.len() - 1));
+    }else {
+        nrrd.space_dimension = Some(SpaceDimension::new(dims.len()));
+    }
 
     // handle space directions for complex data. If vox spacing is not given, default to 1mm
     let mut sd = SpaceDirections::new();
-    sd.extend_none();
+    if args.complex {
+        sd.extend_none();
+    }
     if let Some(vox_size_str) = &args.vox_size_mm {
         let vox_size = parse_list_input::<f64>(vox_size_str, '[', ']')?;
         sd.extend_from_spacing(&vox_size);
@@ -192,7 +199,12 @@ fn build_nrrd(args: &BuildArgs) -> Result<NRRD,String> {
         sd.extend_from_spacing(&vec![1.; dims.len()]);
     }
     nrrd.space_directions = Some(sd);
-    nrrd.space_units = Some(SpaceUnits::new_mm(dims.len()));
+
+    if args.complex {
+        nrrd.space_units = Some(SpaceUnits::new_mm(dims.len() - 1));
+    }else {
+        nrrd.space_units = Some(SpaceUnits::new_mm(dims.len()));
+    }
 
     Ok(nrrd)
 
