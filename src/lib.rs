@@ -208,15 +208,8 @@ pub fn write_nrrd<T:NRRDType>(filepath:impl AsRef<Path>, ref_header:&NRRD, data:
         let data_p = filepath.as_ref().with_extension("nrrd");
         let mut f = File::create(data_p).unwrap();
         f.write_all(h.to_string().as_bytes()).unwrap();
-
+        write!(&mut f,"\n").unwrap();
         encoding.write_payload(&mut f, bytes);
-
-        // match encoding {
-        //     Encoding::raw => io::write_raw(&mut f, bytes),
-        //     Encoding::rawgz => io::write_gzip(&mut f, bytes),
-        //     Encoding::rawbz2 => io::write_bzip2(&mut f, bytes),
-        //     _=> panic!("encoding {} not yet supported",h.encoding)
-        // };
 
     }else {
 
