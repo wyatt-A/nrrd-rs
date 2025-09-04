@@ -439,6 +439,13 @@ impl SpaceDirections {
     pub fn len(&self) -> usize {
         self.directions.len()
     }
+
+    /// returns the vector magnitude for each space direction
+    pub fn norms(&self) -> Vec<f64> {
+        self.directions.iter().filter_map(|x|x.as_ref()).map(|v|{
+            v.v.iter().map(|&x| x*x).sum::<f64>().sqrt()
+        }).collect()
+    }
 }
 
 impl HeaderDef for SpaceDirections {
