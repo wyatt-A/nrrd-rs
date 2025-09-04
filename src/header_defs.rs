@@ -406,7 +406,7 @@ impl Display for SpaceOrigin {
 
 #[derive(Debug,Clone)]
 pub struct SpaceDirections {
-    directions:Vec<Option<NrrdVec>>,
+    pub directions:Vec<Option<NrrdVec>>,
 }
 
 impl SpaceDirections {
