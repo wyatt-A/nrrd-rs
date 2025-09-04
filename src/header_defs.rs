@@ -1627,7 +1627,7 @@ impl Display for Units {
 
 #[derive(Debug,Clone)]
 pub struct Kinds {
-    kinds: Vec<Kind>
+    pub kinds: Vec<Kind>
 }
 
 impl Kinds {
